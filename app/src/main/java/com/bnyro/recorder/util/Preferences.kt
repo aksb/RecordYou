@@ -21,6 +21,13 @@ object Preferences {
     const val namingPatternKey = "namingPattern"
     const val showOverlayAnnotationToolKey = "annotationTool"
     const val showVisualizerTimestamps = "visualizerTimestamp"
+    const val floatingBallKey = "floatingBall"
+    const val floatingBallHintDismissedKey = "floatingBallHintDismissed"
+    const val videoResolutionKey = "videoResolution"
+    const val ballPosXPortraitKey = "ballPosXPortrait"
+    const val ballPosYPortraitKey = "ballPosYPortrait"
+    const val ballPosXLandscapeKey = "ballPosXLandscape"
+    const val ballPosYLandscapeKey = "ballPosYLandscape"
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREF_FILE_NAME, Context.MODE_PRIVATE)

@@ -33,7 +33,32 @@ class ScreenRecorderService : RecorderService() {
     private var activityResult: ActivityResult? = null
     override val fgServiceType: Int?
         get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            val usesMicrophone = Preferences.prefs.getInt(
+                Preferences.audioSourceKey,
+                AudioSource.NONE.value
+            ) == AudioSource.MICROPHONE.value
+            if (usesMicrophone) {
+                // Screen recording with "microphone audio" enabled captures
+                // the mic in addition to the screen, but this service was
+                // only ever declared/started as a "mediaProjection" type
+                // foreground service - never "microphone" too. On at least
+                // some devices/ROMs, Android's audio policy silences a
+                // background app's mic capture unless the foreground
+                // service that's using the mic is actually declared with
+                // the "microphone" type (see AndroidManifest.xml, which now
+                // declares both types on this service to match). This is
+                // very likely the root cause of recordings that randomly go
+                // silent after a few seconds once the app is backgrounded.
+                // Applied from Q onwards (both type constants exist since
+                // API 29) - deliberately NOT gated behind Android 14 the
+                // way AudioRecorderService's own microphone type is, since
+                // this needs to actually take effect on Android 13 devices
+                // to be testable/useful there.
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            }
         } else {
             null
         }
@@ -82,7 +107,26 @@ class ScreenRecorderService : RecorderService() {
                 ).let {
                     setAudioSource(it)
                 }
+            }
 
+            setOutputFormat(videoFormat.format)
+            setVideoFrameRate(resolution.frameRate)
+            setVideoEncoder(videoFormat.codec)
+
+            val bitratePref = Preferences.prefs.getInt(Preferences.videoBitrateKey, -1)
+            val autoBitrate = (BPP * resolution.frameRate * resolution.width * resolution.height).toInt()
+            setVideoEncodingBitRate(bitratePref.takeIf { it > 0 } ?: autoBitrate)
+
+            if (audioSource == AudioSource.MICROPHONE) {
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+
+                // Sample rate / bitrate / channel count must be set after
+                // setOutputFormat() + setAudioEncoder(), not before -
+                // MediaRecorder's documented state machine only accepts
+                // these calls at this point. They used to be set earlier
+                // (right after setAudioSource()), which is out of order per
+                // the API contract even though it doesn't throw outright on
+                // every device.
                 Preferences.prefs.getInt(Preferences.audioSampleRateKey, -1).takeIf {
                     it > 0
                 }?.let {
@@ -96,18 +140,6 @@ class ScreenRecorderService : RecorderService() {
                 Preferences.prefs.getInt(Preferences.audioChannelsKey, AudioChannels.MONO.value).let {
                     setAudioChannels(it)
                 }
-            }
-
-            setOutputFormat(videoFormat.format)
-            setVideoFrameRate(resolution.frameRate)
-            setVideoEncoder(videoFormat.codec)
-
-            val bitratePref = Preferences.prefs.getInt(Preferences.videoBitrateKey, -1)
-            val autoBitrate = (BPP * resolution.frameRate * resolution.width * resolution.height).toInt()
-            setVideoEncodingBitRate(bitratePref.takeIf { it > 0 } ?: autoBitrate)
-
-            if (audioSource == AudioSource.MICROPHONE) {
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
             }
 
             setVideoSize(resolution.width, resolution.height)
@@ -152,17 +184,51 @@ class ScreenRecorderService : RecorderService() {
         val metrics = DisplayMetrics()
         display.getRealMetrics(metrics)
 
+        val (width, height) = scaleToQualityPreset(metrics.widthPixels, metrics.heightPixels)
+
         return VideoResolution(
-            metrics.widthPixels,
-            metrics.heightPixels,
+            width,
+            height,
             metrics.densityDpi,
             display.refreshRate.toInt()
         )
     }
 
+    /**
+     * Scales the screen's native resolution down to the selected quality preset
+     * (target short edge in px, see [Preferences.videoResolutionKey]), keeping the
+     * original aspect ratio. Both dimensions are rounded down to the nearest even
+     * number since H.264/H.265 encoders require even width/height. Returns the
+     * resolution unchanged when "original" quality is selected (value <= 0), or
+     * when the screen is already smaller than the target.
+     */
+    private fun scaleToQualityPreset(width: Int, height: Int): Pair<Int, Int> {
+        val targetShortEdge = Preferences.prefs.getInt(Preferences.videoResolutionKey, 0)
+        if (targetShortEdge <= 0) return width to height
+
+        val shortEdge = minOf(width, height)
+        if (shortEdge <= targetShortEdge) return width to height
+
+        val scale = targetShortEdge.toFloat() / shortEdge
+        var scaledWidth = (width * scale).toInt()
+        var scaledHeight = (height * scale).toInt()
+        if (scaledWidth % 2 != 0) scaledWidth -= 1
+        if (scaledHeight % 2 != 0) scaledHeight -= 1
+
+        return scaledWidth to scaledHeight
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         virtualDisplay?.release()
+        // Without this, the MediaProjection session (and the persistent
+        // "screen recording/casting" status bar icon tied to it) stays
+        // alive even after we're done - releasing the VirtualDisplay only
+        // stops feeding it frames, it doesn't hand the projection token
+        // back. Previously the icon would only clear once the whole app
+        // process was killed.
+        mediaProjection?.stop()
+        mediaProjection = null
     }
 
     override fun getCurrentAmplitude() = recorder?.maxAmplitude

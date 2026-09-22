@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "Record You"
 include(":app")
+include(":magisk-placeholder")

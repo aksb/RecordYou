@@ -11,8 +11,8 @@ android {
         applicationId = "com.bnyro.recorder"
         minSdk = 21
         targetSdk = 34
-        versionCode = 19
-        versionName = "8.0"
+        versionCode = 36
+        versionName = "8.17"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -27,6 +27,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // No dedicated release keystore - this app is only ever
+            // sideloaded on rooted devices for personal use, never published
+            // to a store, and updates are handled manually (uninstall old
+            // version / remove the Magisk module before installing a new
+            // release) rather than relying on Android's same-signature
+            // in-place update mechanism. Reusing the auto-generated debug
+            // signing config avoids having to manage a real keystore.
+            signingConfig = signingConfigs.getByName("debug")
         }
         debug {
             isDebuggable = true

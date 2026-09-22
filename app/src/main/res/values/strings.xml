@@ -68,7 +68,26 @@
     <string name="light">Light</string>
     <string name="screen_recorder_annotation">Screen Record Annotation</string>
     <string name="screen_recorder_annotation_desc">Show annotation tool during screen recording</string>
+    <string name="floating_ball">Floating ball</string>
+    <string name="floating_ball_desc">Show a floating ball on top of other apps to start, pause, resume or stop a recording</string>
+    <string name="floating_ball_permission_missing">Please allow RecordYou to display over other apps</string>
     <string name="amoled_dark">Black</string>
+    <string name="video_quality">Video quality</string>
+    <string name="quality_original">Original</string>
+    <string name="bitrate_preset">Bitrate preset</string>
+    <string name="quality_high">High</string>
+    <string name="quality_medium">Medium</string>
+    <string name="quality_low">Low</string>
+    <string name="close_floating_ball">Close floating ball</string>
+    <string name="tile_toggle_floating_ball">Floating ball</string>
+    <string name="shortcut_enable_floating_ball">Enable floating ball</string>
+    <string name="stop_recording_confirmation">Stop recording?</string>
+    <string name="floating_ball_hint_message">While recording audio/screen, long-press the floating ball to stop it.</string>
+    <string name="dont_show_again">Don\'t show again</string>
+    <string name="custom">Custom</string>
+    <string name="save">Save</string>
+    <string name="mod_author">Mod author</string>
+    <string name="original_author">Original author</string>
     <!-- Other info -->
     <string name="default_sort">Default</string>
     <string name="audio_visualizer_timestamps">Audio visualizer timestamps</string>

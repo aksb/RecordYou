@@ -11,18 +11,17 @@ data class VideoFormat(
     val format: Int
 ) {
     companion object {
+        // WebM (VP8/VP9) removed: MediaRecorder failed to actually produce a
+        // usable file with these on the devices this was tested on (always a
+        // fixed ~6KB empty file - the encoder never got initialized, and the
+        // failure was silently swallowed). H.264/H.265 cover every real use
+        // case for this app anyway.
         val codecs = mutableListOf(
             VideoFormat(
                 "H.264",
                 MediaRecorder.VideoEncoder.H264,
                 "mp4",
                 MediaRecorder.OutputFormat.MPEG_4
-            ),
-            VideoFormat(
-                "webm (VP8)",
-                MediaRecorder.VideoEncoder.VP8,
-                "webm",
-                MediaRecorder.OutputFormat.WEBM
             )
         ).also {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -35,23 +34,14 @@ data class VideoFormat(
                     )
                 )
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                it.add(
-                    VideoFormat(
-                        "webm (VP9)",
-                        MediaRecorder.VideoEncoder.VP9,
-                        "webm",
-                        MediaRecorder.OutputFormat.WEBM
-                    )
-                )
-            }
         }
 
-        fun getCurrent() = codecs.first {
+        fun getCurrent() = codecs.firstOrNull {
             it.codec == Preferences.prefs.getInt(
                 Preferences.videoCodecKey,
                 MediaRecorder.VideoEncoder.H264
             )
-        }
+        } ?: codecs.first() // falls back to H.264 if a previously-saved prefs
+        // value pointed at the now-removed WebM codecs
     }
 }

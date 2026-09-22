@@ -13,12 +13,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -27,11 +29,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -52,6 +56,14 @@ import com.bnyro.recorder.ui.dialogs.AboutDialog
 import com.bnyro.recorder.ui.models.ThemeModel
 import com.bnyro.recorder.util.PickFolderContract
 import com.bnyro.recorder.util.Preferences
+
+private const val BITRATE_PRESET_LOW = 1_500_000
+private const val BITRATE_PRESET_MEDIUM = 4_000_000
+private const val BITRATE_PRESET_HIGH = 8_000_000
+private val BITRATE_PRESETS = listOf(BITRATE_PRESET_LOW, BITRATE_PRESET_MEDIUM, BITRATE_PRESET_HIGH)
+// Not a real bitrate value, never persisted - only used to tell the "自定义"
+// chip apart from the others in the selector below.
+private const val CUSTOM_BITRATE_SENTINEL = -2
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,10 +98,13 @@ fun SettingsScreen() {
         mutableStateOf(VideoFormat.getCurrent())
     }
 
+    val context = LocalContext.current
+
     val directoryPicker = rememberLauncherForActivityResult(PickFolderContract()) {
         it ?: return@rememberLauncherForActivityResult
         Preferences.edit { putString(Preferences.targetFolderKey, it.toString()) }
     }
+
     var showAbout by remember {
         mutableStateOf(false)
     }
@@ -231,11 +246,99 @@ fun SettingsScreen() {
                 }
             }
             Spacer(modifier = Modifier.height(10.dp))
-            CustomNumInputPref(
-                key = Preferences.videoBitrateKey,
+            var videoResolution by remember {
+                mutableStateOf(Preferences.prefs.getInt(Preferences.videoResolutionKey, 0))
+            }
+            ChipSelector(
+                title = stringResource(R.string.video_quality),
+                entries = listOf(
+                    stringResource(R.string.quality_original),
+                    "360p",
+                    "480p",
+                    "720p",
+                    "1080p"
+                ),
+                values = listOf(0, 360, 480, 720, 1080),
+                selections = listOf(videoResolution)
+            ) { index, newValue ->
+                if (newValue) {
+                    videoResolution = listOf(0, 360, 480, 720, 1080)[index]
+                    Preferences.edit { putInt(Preferences.videoResolutionKey, videoResolution) }
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            var videoBitrate by remember {
+                mutableStateOf(Preferences.prefs.getInt(Preferences.videoBitrateKey, -1))
+            }
+            // "Custom" isn't a real stored bitrate value - it's just which
+            // chip/row is showing. Tracked separately so tapping "自定义"
+            // reveals the input row without first requiring a valid saved
+            // number, and so the row always starts pre-filled with whatever
+            // is actually persisted right now instead of a stale value from
+            // whenever this screen first composed.
+            var customBitrateSelected by remember {
+                mutableStateOf(videoBitrate > 0 && videoBitrate !in BITRATE_PRESETS)
+            }
+            var customBitrateInput by remember {
+                mutableStateOf(if (customBitrateSelected) videoBitrate.toString() else "")
+            }
+            ChipSelector(
                 title = stringResource(R.string.bitrate),
-                defValue = 1_200_000
-            )
+                entries = listOf(
+                    stringResource(R.string.quality_low),
+                    stringResource(R.string.quality_medium),
+                    stringResource(R.string.quality_high),
+                    stringResource(R.string.auto),
+                    stringResource(R.string.custom)
+                ),
+                values = listOf(
+                    BITRATE_PRESET_LOW,
+                    BITRATE_PRESET_MEDIUM,
+                    BITRATE_PRESET_HIGH,
+                    -1,
+                    CUSTOM_BITRATE_SENTINEL
+                ),
+                selections = listOf(if (customBitrateSelected) CUSTOM_BITRATE_SENTINEL else videoBitrate)
+            ) { index, newValue ->
+                if (newValue) {
+                    val picked = listOf(
+                        BITRATE_PRESET_LOW,
+                        BITRATE_PRESET_MEDIUM,
+                        BITRATE_PRESET_HIGH,
+                        -1,
+                        CUSTOM_BITRATE_SENTINEL
+                    )[index]
+                    if (picked == CUSTOM_BITRATE_SENTINEL) {
+                        customBitrateSelected = true
+                        customBitrateInput = videoBitrate.takeIf { it > 0 }?.toString().orEmpty()
+                    } else {
+                        customBitrateSelected = false
+                        videoBitrate = picked
+                        Preferences.edit { putInt(Preferences.videoBitrateKey, picked) }
+                    }
+                }
+            }
+            if (customBitrateSelected) {
+                Spacer(modifier = Modifier.height(5.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        modifier = Modifier.padding(horizontal = 5.dp),
+                        value = customBitrateInput,
+                        onValueChange = { customBitrateInput = it },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        label = { Text(stringResource(R.string.bitrate)) }
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Button(onClick = {
+                        customBitrateInput.toIntOrNull()?.takeIf { it > 0 }?.let {
+                            videoBitrate = it
+                            Preferences.edit { putInt(Preferences.videoBitrateKey, it) }
+                        }
+                    }) {
+                        Text(stringResource(R.string.save))
+                    }
+                }
+            }
             Spacer(modifier = Modifier.height(10.dp))
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 CheckboxPref(

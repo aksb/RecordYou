@@ -1,0 +1,6 @@
+id=RecordYouSystemizer
+name=RecordYou 保活模块
+version=v1.0
+versionCode=1
+author=you-apps（原作者）/ aksb（保活模块修改）
+description=将 RecordYou 安装为系统特权应用（/system/priv-app）：解锁系统内部音频录制所需的 CAPTURE_AUDIO_OUTPUT 权限，并在开机时自动执行电量策略白名单命令，降低被系统杀后台的概率。基于 you-apps/RecordYou-Magisk-Module 修改。

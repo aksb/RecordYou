@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        Intentionally empty: no activities, no services, no permissions.
+        This APK exists purely to occupy the com.bnyro.recorder package name
+        in /system/priv-app so the real app inherits privileged status when
+        installed/updated over it. See build.gradle.kts for the full story.
+    -->
+    <application android:hasCode="false" />
+</manifest>

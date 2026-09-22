@@ -16,41 +16,164 @@ on:
       - ".github/**/*.md"
 
 jobs:
-  debug-builds:
+  # Runs on every normal push (not a tag) and on pull requests: compiles the
+  # real "release" package (applicationId "com.bnyro.recorder", same as a
+  # tagged release - NOT the ".debug" package) plus the matching Magisk
+  # module, so day-to-day pushes can actually exercise the privileged
+  # features (internal audio, the module's keep-alive script) while testing.
+  # For plain pushes, both are published to a rolling DRAFT Release - drafts
+  # are only visible to people with write access to the repo, never to the
+  # public - so this never leaks a half-tested build. Pull requests only get
+  # compiled, never published, since a fork's PR wouldn't have permission to
+  # publish anyway.
+  #
+  # File names carry the versionName currently set in app/build.gradle.kts
+  # (e.g. "RecordYou-debug-v8.12.apk") - bump that field before pushing if
+  # you want the file name to reflect it. This is purely a naming
+  # convenience so you can tell builds apart at a glance; it has no effect
+  # on the app's actual versionCode/versionName baked into the APK itself.
+  push-test-build:
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: gradle/wrapper-validation-action@v2
-      
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: 17
           distribution: "temurin"
           cache: "gradle"
-          
-      - name: Compile
+
+      - name: Read version name
+        id: version
         run: |
-          ./gradlew assembleDebug
-          
-      - name: Sign Apk
-        continue-on-error: true
-        id: sign_apk
-        uses: ilharp/sign-android-release@v1
-        with:
-          releaseDir: app/build/outputs/apk/debug
-          signingKey: ${{ secrets.ANDROID_SIGNING_KEY }}
-          keyAlias: ${{ secrets.ANDROID_KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          
-      - name: Remove file that aren't signed
-        continue-on-error: true
+          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          echo "name=v${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Compile release APK and Magisk module placeholder APK
         run: |
-          ls | grep 'signed\.apk$' && find . -type f -name '*.apk' ! -name '*-signed.apk' -delete
-          
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+          ./gradlew assembleRelease :magisk-placeholder:assembleRelease
+
+      - name: Rename and package artifacts
+        if: github.event_name == 'push'
+        run: |
+          APK_SRC=$(find app/build/outputs/apk/release -name "*.apk" | head -n1)
+          cp "$APK_SRC" "RecordYou-debug-${VERSION_NAME}.apk"
+
+          cp magisk-placeholder/build/outputs/apk/release/*.apk magisk-module/system/priv-app/RecordYou/RecordYou.apk
+          rm -f magisk-module/system/priv-app/RecordYou/.gitkeep
+          sed -i "s/^version=.*/version=${VERSION_NAME}/" magisk-module/module.prop
+          sed -i "s/^versionCode=.*/versionCode=${GITHUB_RUN_NUMBER}/" magisk-module/module.prop
+          cd magisk-module
+          zip -r "../RecordYou-KeepAlive-Module-debug-${VERSION_NAME}.zip" . -x "README.md"
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+
+      - name: Publish test build (private draft)
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
         with:
-          name: app
-          path: app/build/outputs/apk/debug/*.apk
+          tag_name: test-build-latest
+          name: "Test build (private) ${{ steps.version.outputs.name }}"
+          draft: true
+          prerelease: true
+          make_latest: false
+          files: |
+            RecordYou-debug-${{ steps.version.outputs.name }}.apk
+            RecordYou-KeepAlive-Module-debug-${{ steps.version.outputs.name }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Runs only when a tag is pushed: builds the same release APK plus the
+  # Magisk keep-alive module zip, and publishes both to a normal PUBLIC
+  # Release named after the tag. Both apks are signed with the same
+  # auto-generated debug keystore (see app/build.gradle.kts) since this
+  # project is only ever sideloaded, never published through a store - no
+  # dedicated keystore is managed. Because each tag is built by a fresh CI
+  # runner, its debug keystore differs from whatever built the previous
+  # release - installing a new tagged release over an older one (or over a
+  # push-test-build) will very likely fail with a signature mismatch; the
+  # fix is to uninstall the old APK (and, if you'd previously flashed the
+  # matching Magisk module, remove/reflash that too) before installing the
+  # new one - see magisk-module/README.md.
+  #
+  # File names carry the tag name verbatim (e.g. tag "v8.12R" ->
+  # "RecordYou-Releases-v8.12R.apk") - whatever you type as the tag when you
+  # create it is what shows up in the file name. The app's own versionName
+  # (and the Magisk module's version) are synced to that same tag before
+  # compiling, so the file name, the version shown inside the app, and the
+  # module version all agree - see the "Sync app version with the tag" step.
+  release-build:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gradle/wrapper-validation-action@v2
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: "temurin"
+          cache: "gradle"
+
+      - name: Sync app version with the tag
+        run: |
+          # Whatever name you type when creating the tag (e.g. "v8.14R")
+          # becomes the app's own versionName too - strip the leading "v"
+          # and an optional trailing "R" release marker, e.g. "v8.14R" ->
+          # "8.14". This keeps the APK's real internal version, the file
+          # name, and the Magisk module version all reading the same
+          # number, instead of the file name being the only thing that
+          # tracked the tag.
+          VERSION_NAME="${GITHUB_REF_NAME#v}"
+          VERSION_NAME="${VERSION_NAME%R}"
+          sed -i "s/versionName = \".*\"/versionName = \"${VERSION_NAME}\"/" app/build.gradle.kts
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+
+      - name: Compile release APK and Magisk module placeholder APK
+        run: |
+          ./gradlew assembleRelease :magisk-placeholder:assembleRelease
+
+      - name: Rename and package artifacts
+        run: |
+          APK_SRC=$(find app/build/outputs/apk/release -name "*.apk" | head -n1)
+          cp "$APK_SRC" "RecordYou-Releases-${GITHUB_REF_NAME}.apk"
+
+          cp magisk-placeholder/build/outputs/apk/release/*.apk magisk-module/system/priv-app/RecordYou/RecordYou.apk
+          rm -f magisk-module/system/priv-app/RecordYou/.gitkeep
+          sed -i "s/^version=.*/version=${GITHUB_REF_NAME}/" magisk-module/module.prop
+          sed -i "s/^versionCode=.*/versionCode=${GITHUB_RUN_NUMBER}/" magisk-module/module.prop
+          cd magisk-module
+          zip -r "../RecordYou-KeepAlive-Module-Releases-${GITHUB_REF_NAME}.zip" . -x "README.md"
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "RecordYou ${{ github.ref_name }}"
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: |
+            RecordYou-Releases-${{ github.ref_name }}.apk
+            RecordYou-KeepAlive-Module-Releases-${{ github.ref_name }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

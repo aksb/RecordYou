@@ -13,7 +13,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,13 +39,9 @@ fun AboutDialog(onDismissRequest: () -> Unit) {
     val context = LocalContext.current
     val view = LocalView.current
     val actions = listOf(
-        AboutItem(R.string.source_code, Icons.Default.Code, "https://github.com/you-apps/RecordYou"),
-        AboutItem(R.string.author, Icons.Default.Person, "https://github.com/you-apps"),
-        AboutItem(
-            R.string.translation,
-            Icons.Default.Translate,
-            "https://hosted.weblate.org/projects/you-apps/record-you"
-        )
+        AboutItem(R.string.source_code, Icons.Default.Code, "https://github.com/aksb/RecordYou/"),
+        AboutItem(R.string.mod_author, Icons.Default.Person, "https://github.com/aksb/"),
+        AboutItem(R.string.original_author, Icons.Default.Person, "https://github.com/you-apps")
     )
 
     AlertDialog(

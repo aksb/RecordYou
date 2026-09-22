@@ -33,6 +33,13 @@ class AudioRecorderService : RecorderService() {
             )
             setAudioSource(audioSource)
 
+            setOutputFormat(audioFormat.format)
+            setAudioEncoder(audioFormat.codec)
+
+            // Sample rate / bitrate / channel count must be set after
+            // setOutputFormat() + setAudioEncoder(), not before -
+            // MediaRecorder's documented state machine only accepts these
+            // calls at this point (see the same fix in ScreenRecorderService).
             val sampleRatePref = Preferences.prefs.getInt(Preferences.audioSampleRateKey, -1).takeIf { it > 0 }
             val audioBitrate = Preferences.prefs.getInt(Preferences.audioBitrateKey, -1).takeIf { it > 0 }
             if (sampleRatePref != null && (audioFormat.codec != MediaRecorder.AudioEncoder.OPUS || sampleRatePref in opusSampleRates)) {
@@ -47,9 +54,6 @@ class AudioRecorderService : RecorderService() {
             Preferences.prefs.getInt(Preferences.audioChannelsKey, AudioChannels.MONO.value).let {
                 setAudioChannels(it)
             }
-
-            setOutputFormat(audioFormat.format)
-            setAudioEncoder(audioFormat.codec)
 
             outputFile = (application as App).fileRepository.getOutputFile(
                 audioFormat.extension

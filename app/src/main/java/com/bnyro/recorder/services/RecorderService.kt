@@ -27,6 +27,7 @@ import com.bnyro.recorder.receivers.FinishedNotificationReceiver
 import com.bnyro.recorder.ui.MainActivity
 import com.bnyro.recorder.util.NotificationHelper
 import com.bnyro.recorder.util.PermissionHelper
+import com.bnyro.recorder.util.RecorderStatusHolder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -173,6 +174,7 @@ abstract class RecorderService : LifecycleService() {
         runCatching {
             recorderState = RecorderState.ACTIVE
             onRecorderStateChanged(recorderState)
+            RecorderStatusHolder.updateState(recorderState)
         }
         updateNotification()
     }
@@ -183,6 +185,7 @@ abstract class RecorderService : LifecycleService() {
         runCatching {
             recorderState = RecorderState.PAUSED
             onRecorderStateChanged(recorderState)
+            RecorderStatusHolder.updateState(recorderState)
         }
         updateNotification()
     }
@@ -193,6 +196,7 @@ abstract class RecorderService : LifecycleService() {
         runCatching {
             recorderState = RecorderState.ACTIVE
             onRecorderStateChanged(recorderState)
+            RecorderStatusHolder.updateState(recorderState)
         }
         updateNotification()
     }
@@ -201,6 +205,7 @@ abstract class RecorderService : LifecycleService() {
         runCatching {
             recorderState = RecorderState.IDLE
             onRecorderStateChanged(recorderState)
+            RecorderStatusHolder.updateState(recorderState)
         }
 
         NotificationManagerCompat.from(this)

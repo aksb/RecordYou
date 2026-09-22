@@ -52,7 +52,14 @@ class RecorderModel : ViewModel() {
                 recorderState = it
             }
             (recorderService as? ScreenRecorderService)?.prepare(activityResult!!)
-            if (supportsOverlay) canvasOverlay?.show()
+            // Only screen recording ever creates a canvasOverlay (see
+            // startVideoRecorder below) - guarding on the service type here
+            // as well (not just relying on canvasOverlay being null for audio
+            // recording) makes sure a leftover overlay from an earlier video
+            // session can never resurface during an audio-only session.
+            if (supportsOverlay && recorderService is ScreenRecorderService) {
+                canvasOverlay?.show()
+            }
             recorderService?.start()
         }
 
@@ -73,7 +80,7 @@ class RecorderModel : ViewModel() {
     }
 
     @SuppressLint("NewApi")
-    fun startAudioRecorder(context: Context) {
+    fun startAudioRecorder(context: Context): Boolean {
         val audioPermission = mutableListOf(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             audioPermission.add(Manifest.permission.POST_NOTIFICATIONS)
@@ -92,7 +99,7 @@ class RecorderModel : ViewModel() {
                 context.getString(R.string.no_sufficient_permissions), Toast.LENGTH_SHORT
             )
                 .show()
-            return
+            return false
         }
 
         val serviceIntent =
@@ -103,6 +110,7 @@ class RecorderModel : ViewModel() {
             }
 
         startRecorderService(context, serviceIntent)
+        return true
     }
 
     private fun startRecorderService(context: Context, intent: Intent) {
@@ -129,6 +137,14 @@ class RecorderModel : ViewModel() {
     fun stopRecording() {
         recorderService?.onDestroy()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) canvasOverlay?.remove()
+        // Without this, the reference stays around after the view is
+        // removed - if a subsequent recording session then reconnects to
+        // `connection` (see onServiceConnected above), it would try to
+        // re-show this same, already-removed CanvasOverlay, resulting in a
+        // visible-but-broken overlay (can't be dragged, buttons don't
+        // respond) turning up in scenarios that never created one, most
+        // noticeably a plain audio recording right after a video one.
+        canvasOverlay = null
         recordedTime = null
         recordedAmplitudes.clear()
     }

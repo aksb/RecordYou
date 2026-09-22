@@ -1,71 +1,48 @@
-> [!WARNING]  
-> This repository is no longer maintained! The app is considered feature-complete though and will continue to work in the future, even though no further updates will be released.
+# RecordYou修改版
 
-<!-- ---------- Header ---------- -->
-<div align="center">
-  <img width="200" height="200"src="fastlane/metadata/android/en-US/images/icon.png">
-  <h1>Record You</h1>
-<p>Privacy focused voice and screen recorder app built with MD3.</p>
+[English](README_EN.md) | 中文
 
-<!-- ---------- Badges ---------- -->
-  <div align="center">
-    <img alt="License" src="https://img.shields.io/github/license/you-apps/RecordYou?color=c3e7ff&style=flat-square">
-    <img alt="Downloads" src="https://img.shields.io/github/downloads/you-apps/RecordYou/total.svg?color=c3e7ff&style=flat-square">
-    <img alt="Last commit" src="https://img.shields.io/github/last-commit/you-apps/RecordYou?color=c3e7ff&style=flat-square">
-    <img alt="Repo size" src="https://img.shields.io/github/repo-size/you-apps/RecordYou?color=c3e7ff&style=flat-square">
-    <img alt="Stars" src="https://img.shields.io/github/stars/you-apps/RecordYou?color=c3e7ff&style=flat-square">
-    <br>
-</div>
-</div>
+一个支持“悬浮球”的录音/录屏app
 
-Read in other languages: [Japanese](https://github.com/kuragehimekurara1/RecordYou/blob/main/README-ja.md)
+> **说明**：本仓库 fork 自 [you-apps/RecordYou](https://github.com/you-apps/RecordYou)，基于其源码修改，
+> 新增了「录音 / 录屏 悬浮球」功能，不需要频繁下拉通知栏，直接通过屏幕上的悬浮球即可快速操作。
+> 针对部分 Android 设备，对后台进行「录屏 + 麦克风录音」时可能出现的音频异常进行了修复。
+> 调整部分 UI 界面：对原版部分界面进行了重新调整和优化，让操作逻辑更加直观，也更加符合自己的使用习惯。
+> 本次修改日期：2026-09。
+> 本修改与原作者无关。
+> 如果你觉得本修改对你有用，欢迎在页面底部的二维码打赏（仅针对本修改项目，与原作者无关）。
 
-<!-- ---------- Description ---------- -->
-## Features
+<img src="./.github/001.jpg" alt="录音列表" width="200" /> <img src="./.github/002.jpg" alt="录音录屏悬浮球" width="200" />
 
-- [x] Material Design 3 (You)
-- [x] Dark and light theme
-- [X] Support for audio and screen recording
-- [X] Different available formats and codecs
-- [X] In-app recordings player
-- [X] SAF (Storage Access Framework) support
-- [X] Written in Jetpack Compose 
+## 📦 安装方式
+### 方案一：只安装 APK
+直接安装 APK 就可以正常使用。
 
-<!-- ---------- Download ---------- -->
-## Download
+### 方案二：APK + Magisk 模块
+如果你的设备已经 Root，并且使用 Magisk：
+安装 APK 后，再刷入配套 **Magisk 模块**，即可额外获得：
+🔊 **手机内部音频录制支持**
+同时，Magisk 模块还加入了一个额外的小功能：🛡️ 开机「App 保活」命令。让 App 在后台运行时更加不容易因为系统内存回收而被直接杀掉。
 
-<div align="center">
+本修改项目为纯 AI 编写，未经人工逐行代码审查。本修改模块仅在作者本人刷入 PixelExperience Android 13 系统的红米 K40S 和红米 K30 5G 设备上测试成功，不保证在其他设备、系统版本或环境下的兼容性与稳定性。
+刷入模块存在极高风险，可能导致设备出现无限重启、卡屏死机、系统损坏（变砖）乃至硬件受损。在尝试刷入前，请务必提前备份好个人所有重要数据。
+如果您缺乏刷机救砖经验，或不知道如何在系统崩溃时进行自救，请绝对不要尝试刷入。
+一旦您选择刷入本模块，即视为您已完全理解并自愿接受上述所有风险，由此产生的数据丢失、设备损坏等一切后果均由您本人自行承担。
 
-[<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png" alt="Get it on F-Droid" height="80">](https://f-droid.org/packages/com.bnyro.recorder/)
-[<img src="https://raw.githubusercontent.com/vadret/android/master/assets/get-github.png" alt="Get it on GitHub" height="80">](https://github.com/you-apps/RecordYou/releases)
+## 打赏（仅针对本修改版）
 
-</div>
+本 fork 新增了上面提到的“悬浮球、修复部分设备音频异常”功能。如果这个修改对你有帮助，欢迎通过下面的二维码请我喝杯咖啡，这个打赏仅针对本修改项目，与原作者无关。
 
-<!-- ---------- Screenshots ---------- -->
-## Screenshots
-<div style="display: flex">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1-audio-recorder.png" width="24%">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/2-screen-recorder.png" width="24%">  
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/3-recordings.png" width="24%">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/4-settings.png" width="24%">
-</div>
+<img src="./.github/quick-response-code.jpg" alt="打赏二维码" width="200" />
 
-<!-- ---------- Contribution ---------- -->
-## Feedback and contributions
-***All contributions are very welcome!***
+## 📄 许可证 (License)
 
-* Feel free to join the [Matrix room](https://matrix.to/#/#you-apps:matrix.org) for discussions about the app.
-* Bug reports and feature requests can be submitted [here](https://github.com/you-apps/RecordYou/issues) (please make sure to fill out all the requested information properly!).
-* If you are a developer and wish to contribute to the app, please **fork** the project and submit a [**pull request**](https://help.github.com/articles/about-pull-requests/).
+本项目基于 [RecordYou](https://github.com/you-apps/RecordYou) 进行二次开发，遵循 **GNU General Public License v3.0 (GPL-3.0)** 开源协议。
 
-## Translation
-<a href="https://hosted.weblate.org/projects/you-apps/record-you/">
-<img src="https://hosted.weblate.org/widgets/you-apps/-/record-you/287x66-grey.png" alt="Translation status" />
-</a>
+- 本修改版的全部源代码均已在此 GitHub 仓库开源。
+- 原项目版权归原作者 [you-apps / Bnyro](https://github.com/you-apps) 所有。
+- 本项目继承 GPL-3.0 协议，您可以自由地使用、修改和分发本项目，但必须保持同样的 GPL-3.0 协议开源。
 
-## Credits
-* Icon design by [M00NJ](https://github.com/M00NJ)
+## 🙏 致谢 (Credits)
 
-## License
-
-Record You is licensed under the [**GNU General Public License**](https://www.gnu.org/licenses/gpl.html): You can use, study and share it as you want.
+- 感谢原作者 [Bnyro](https://github.com/Bnyro) 及 [RecordYou](https://github.com/you-apps/RecordYou) 贡献者提供的优秀开源应用。

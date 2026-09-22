@@ -48,14 +48,17 @@ class PlayerModel(context: Context, private val fileRepository: FileRepository) 
         loadFiles()
     }
 
-    fun deleteFiles() {
+    /**
+     * Deletes whatever's currently selected. If nothing is selected,
+     * [fallbackItems] is deleted instead - the caller passes in whichever
+     * type's list is currently on screen (audio or video), so "delete all"
+     * only ever clears the type you're actually looking at, never both at
+     * once.
+     */
+    fun deleteFiles(fallbackItems: List<RecordingItemData> = emptyList()) {
         viewModelScope.launch {
-            if (selectedFiles.isEmpty()) {
-                fileRepository.deleteAllFiles()
-                loadFiles()
-                return@launch
-            }
-            fileRepository.deleteFiles(selectedFiles.map { it.recordingFile })
+            val toDelete = selectedFiles.ifEmpty { fallbackItems }
+            fileRepository.deleteFiles(toDelete.map { it.recordingFile })
             selectedFiles = emptyList()
             loadFiles()
         }

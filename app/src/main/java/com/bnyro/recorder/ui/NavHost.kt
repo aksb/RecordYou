@@ -10,7 +10,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.ui.screens.HomeScreen
-import com.bnyro.recorder.ui.screens.PlayerScreen
 import com.bnyro.recorder.ui.screens.SettingsScreen
 
 @Composable
@@ -52,19 +51,6 @@ fun AppNavHost(
             }
         ) {
             SettingsScreen()
-        }
-
-        composable(route = Destination.RecordingPlayer.route,
-            enterTransition = {
-                slideIntoContainer(
-                    AnimatedContentTransitionScope.SlideDirection.Up,
-                    initialOffset = { it / 4 }) + fadeIn()
-            },
-            exitTransition = {
-                slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Down,
-                    targetOffset = { it / 4 }) + fadeOut()
-            }) {
-            PlayerScreen(showVideoModeInitially = false)
         }
     }
 }

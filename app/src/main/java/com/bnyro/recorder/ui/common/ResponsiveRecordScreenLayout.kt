@@ -27,7 +27,11 @@ fun ResponsiveRecordScreenLayout(
             Box(modifier = Modifier.weight(1f)) {
                 PaneOne()
             }
-            Box(modifier = Modifier.padding(bottom = 20.dp)) {
+            // PaneOne fills all the leftover vertical space above PaneTwo,
+            // so a smaller bottom inset here is what actually pulls the
+            // button down, closer to the bottom nav bar - a bigger inset
+            // would push it further up instead.
+            Box(modifier = Modifier.padding(bottom = 6.dp)) {
                 PaneTwo()
             }
         }
