@@ -7,6 +7,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.MediaRecorder
 import android.os.Binder
@@ -42,6 +43,20 @@ abstract class RecorderService : LifecycleService() {
 
     var onRecorderStateChanged: (RecorderState) -> Unit = {}
     open val fgServiceType: Int? = null
+
+    /**
+     * Whether this service may switch a connected Bluetooth headset into
+     * SCO (hands-free/call) mode so that the headset's own microphone can
+     * be recorded.
+     *
+     * SCO takes the headset away from the normal A2DP media profile: while
+     * it is active the headset's music/video playback is cut or reduced to
+     * call quality. Screen recording therefore must NOT enable it - the
+     * user wants to keep listening to the content being recorded, and the
+     * microphone track is taken from the phone's own mic instead.
+     */
+    protected open val allowBluetoothSco: Boolean = true
+    private var bluetoothScoStarted = false
     var recorderState: RecorderState = RecorderState.IDLE
     private lateinit var audioManager: AudioManager
 
@@ -90,16 +105,25 @@ abstract class RecorderService : LifecycleService() {
         }
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-        runCatching {
-            unregisterReceiver(bluetoothReceiver)
+        // Only take over the Bluetooth headset when a recorder really wants
+        // its microphone AND a headset with a SCO input is connected.
+        // Starting SCO unconditionally (as before) silenced the headset's
+        // media playback for every recording, including screen recordings.
+        if (allowBluetoothSco && hasBluetoothScoInput()) {
+            runCatching {
+                unregisterReceiver(bluetoothReceiver)
+            }
+            ContextCompat.registerReceiver(
+                this,
+                bluetoothReceiver,
+                IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED),
+                RECEIVER_EXPORTED
+            )
+            runCatching {
+                audioManager.startBluetoothSco()
+                bluetoothScoStarted = true
+            }
         }
-        ContextCompat.registerReceiver(
-            this,
-            bluetoothReceiver,
-            IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED),
-            RECEIVER_EXPORTED
-        )
-        audioManager.startBluetoothSco()
 
         runCatching {
             unregisterReceiver(recorderReceiver)
@@ -107,6 +131,17 @@ abstract class RecorderService : LifecycleService() {
         ContextCompat.registerReceiver(this, recorderReceiver, IntentFilter(RECORDER_INTENT_ACTION), RECEIVER_EXPORTED)
 
         super.onCreate()
+    }
+
+    private fun hasBluetoothScoInput(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).any {
+                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.isBluetoothScoAvailableOffCall
+        }
     }
 
     private fun buildNotification(): NotificationCompat.Builder {
@@ -228,8 +263,11 @@ abstract class RecorderService : LifecycleService() {
                 unregisterReceiver(recorderReceiver)
             }
 
+            if (bluetoothScoStarted) {
+                runCatching { audioManager.stopBluetoothSco() }
+                bluetoothScoStarted = false
+            }
             runCatching {
-                audioManager.stopBluetoothSco()
                 unregisterReceiver(bluetoothReceiver)
             }
 

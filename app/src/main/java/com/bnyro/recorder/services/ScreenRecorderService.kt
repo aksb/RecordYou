@@ -28,6 +28,11 @@ class ScreenRecorderService : RecorderService() {
     override val notificationTitle: String
         get() = getString(R.string.recording_screen)
 
+    // Keep the Bluetooth headset on the normal media (A2DP) profile while
+    // screen recording, otherwise its playback goes silent. See
+    // RecorderService.allowBluetoothSco.
+    override val allowBluetoothSco: Boolean = false
+
     private var virtualDisplay: VirtualDisplay? = null
     private var mediaProjection: MediaProjection? = null
     private var activityResult: ActivityResult? = null

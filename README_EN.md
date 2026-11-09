@@ -12,7 +12,7 @@ A privacy-focused audio/screen recording app featuring a Floating Control Ball.
 > - **Disclaimer**: This modification project is independent and not affiliated with the original author.
 > - **Donation**: If you find this modification helpful, feel free to support via the QR code at the bottom of this page (for this modified project only, unrelated to the original author).
 
-<img src="./.github/001.jpg" alt="Recording List" width="200" /> <img src="./.github/002.jpg" alt="Floating Control Ball" width="200" />
+<img src="./.github/001.png" alt="Recording List" width="200" /> <img src="./.github/002.png" alt="Floating Control Ball" width="200" />
 
 ## 📦 Installation
 
