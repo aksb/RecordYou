@@ -33,7 +33,12 @@ import com.bnyro.recorder.util.Preferences
 fun CustomNumInputPref(
     key: String,
     title: String,
-    defValue: Int
+    defValue: Int,
+    enabled: Boolean = true,
+    valueRange: IntRange? = null,
+    standardValues: List<Int> = emptyList(),
+    quickValues: List<Int> = emptyList(),
+    hintText: String? = null
 ) {
     val pref = Preferences.prefs.getInt(key, -1).takeIf { it != -1 }
     val view = LocalView.current
@@ -50,18 +55,25 @@ fun CustomNumInputPref(
     Button(onClick = {
         view.playSoundEffect(SoundEffectConstants.CLICK)
         showDialog = true
-    }) {
+    }, enabled = enabled) {
         Text(text = title)
     }
 
     if (showDialog) {
+        val parsedInput = input.toIntOrNull()
+        // 超出范围或无法解析时不写入偏好设置
+        val outOfRange = !isAutoEnabled &&
+            (parsedInput == null || (valueRange != null && parsedInput !in valueRange))
+        val nonStandard = !isAutoEnabled && parsedInput != null &&
+            standardValues.isNotEmpty() && parsedInput !in standardValues
+
         AlertDialog(
             onDismissRequest = { showDialog = false },
             title = { Text(text = title) },
             confirmButton = {
-                DialogButton(stringResource(R.string.okay)) {
+                DialogButton(stringResource(R.string.okay), enabled = !outOfRange) {
                     Preferences.edit {
-                        putInt(key, input.takeIf { !isAutoEnabled }?.toIntOrNull() ?: -1)
+                        putInt(key, if (isAutoEnabled) -1 else parsedInput ?: -1)
                     }
                     showDialog = false
                 }
@@ -84,12 +96,62 @@ fun CustomNumInputPref(
                     OutlinedTextField(
                         modifier = Modifier.padding(horizontal = 5.dp),
                         value = input,
-                        onValueChange = { input = it },
+                        onValueChange = {
+                            // 只接受数字，避免非法字符
+                            if (it.all(Char::isDigit)) input = it
+                        },
                         enabled = !isAutoEnabled,
                         readOnly = isAutoEnabled,
+                        isError = outOfRange,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        label = { Text(title) }
+                        label = { Text(title) },
+                        supportingText = {
+                            when {
+                                valueRange != null && outOfRange -> {
+                                    Text(
+                                        stringResource(
+                                            R.string.value_out_of_range,
+                                            valueRange.first,
+                                            valueRange.last
+                                        )
+                                    )
+                                }
+
+                                nonStandard -> {
+                                    Text(stringResource(R.string.sample_rate_nonstandard))
+                                }
+
+                                hintText != null -> {
+                                    Text(hintText)
+                                }
+
+                                valueRange != null -> {
+                                    Text(
+                                        stringResource(
+                                            R.string.value_range_hint,
+                                            valueRange.first,
+                                            valueRange.last
+                                        )
+                                    )
+                                }
+                            }
+                        }
                     )
+                    if (quickValues.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(5.dp))
+                        ChipSelector(
+                            entries = quickValues.map { it.toString() },
+                            values = quickValues,
+                            selections = if (isAutoEnabled) {
+                                emptyList()
+                            } else {
+                                listOfNotNull(parsedInput)
+                            },
+                            enabled = !isAutoEnabled
+                        ) { index, selected ->
+                            if (selected) input = quickValues[index].toString()
+                        }
+                    }
                 }
             }
         )

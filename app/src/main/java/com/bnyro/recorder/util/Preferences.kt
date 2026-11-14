@@ -12,6 +12,12 @@ object Preferences {
     const val audioSampleRateKey = "audioSampleRate"
     const val audioBitrateKey = "audioBitrate"
     const val audioChannelsKey = "audioChannels"
+    // 录屏的音频参数与录音分开，避免互相影响
+    const val videoAudioSourceKey = "videoAudioSource"
+    const val videoAudioSampleRateKey = "videoAudioSampleRate"
+    const val videoAudioBitrateKey = "videoAudioBitrate"
+    const val videoAudioChannelsKey = "videoAudioChannels"
+    private const val videoAudioSettingsMigratedKey = "videoAudioSettingsMigrated"
     const val videoCodecKey = "videoCodec"
     const val videoBitrateKey = "videoBitrate"
     const val themeModeKey = "themeMode"
@@ -30,6 +36,31 @@ object Preferences {
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREF_FILE_NAME, Context.MODE_PRIVATE)
+        migrateVideoAudioSettings()
+    }
+
+    /**
+     * 旧版本录音与录屏共用同一套音频参数。升级后录屏改用独立 key，
+     * 这里把旧值复制一份，保证升级后录屏的音频行为不变。
+     */
+    private fun migrateVideoAudioSettings() {
+        if (prefs.getBoolean(videoAudioSettingsMigratedKey, false)) return
+
+        val editor = prefs.edit()
+        if (prefs.contains(audioSourceKey)) {
+            editor.putInt(videoAudioSourceKey, prefs.getInt(audioSourceKey, 0))
+        }
+        if (prefs.contains(audioSampleRateKey)) {
+            editor.putInt(videoAudioSampleRateKey, prefs.getInt(audioSampleRateKey, -1))
+        }
+        if (prefs.contains(audioBitrateKey)) {
+            editor.putInt(videoAudioBitrateKey, prefs.getInt(audioBitrateKey, -1))
+        }
+        if (prefs.contains(audioChannelsKey)) {
+            editor.putInt(videoAudioChannelsKey, prefs.getInt(audioChannelsKey, 0))
+        }
+        editor.putBoolean(videoAudioSettingsMigratedKey, true)
+        editor.apply()
     }
 
     fun edit(action: SharedPreferences.Editor.() -> Unit) {

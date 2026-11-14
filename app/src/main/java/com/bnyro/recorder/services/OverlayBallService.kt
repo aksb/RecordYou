@@ -32,7 +32,7 @@ import kotlin.math.abs
  *
  * - Tap while idle -> opens a small 2-button menu (record audio / record screen).
  * - Tap while recording -> stops the recording immediately.
- * - Drag -> moves the ball, snaps to the nearest screen edge on release.
+ * - Drag -> moves the ball anywhere on screen, kept within the screen bounds.
  *
  * Requires the "display over other apps" permission (SYSTEM_ALERT_WINDOW),
  * which must already be granted before this service is started - see
@@ -190,8 +190,10 @@ class OverlayBallService : Service() {
                     hideMenu()
                 }
                 if (dragging) {
-                    params.x = downParamX + dx.toInt()
-                    params.y = downParamY + dy.toInt()
+                    // 允许拖动到任意位置，但不能超出屏幕
+                    val (x, y) = clampToScreen(downParamX + dx.toInt(), downParamY + dy.toInt())
+                    params.x = x
+                    params.y = y
                     runCatching { windowManager.updateViewLayout(ball, params) }
                 }
                 return true
@@ -199,7 +201,11 @@ class OverlayBallService : Service() {
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (dragging) {
-                    snapToEdge(ball, params)
+                    val (x, y) = clampToScreen(params.x, params.y)
+                    params.x = x
+                    params.y = y
+                    runCatching { windowManager.updateViewLayout(ball, params) }
+                    savePosition(x, y)
                 } else {
                     onBallTapped()
                 }
@@ -210,39 +216,11 @@ class OverlayBallService : Service() {
         return false
     }
 
-    private fun snapToEdge(ball: ImageView, params: WindowManager.LayoutParams) {
-        val screenWidth = resources.displayMetrics.widthPixels
+    private fun clampToScreen(x: Int, y: Int): Pair<Int, Int> {
         val ballSize = dpToPx(BALL_SIZE_DP)
-        val targetX = if (params.x + ballSize / 2 < screenWidth / 2) {
-            0
-        } else {
-            screenWidth - ballSize
-        }
-        savePosition(targetX, params.y)
-        animateBallTo(ball, params, targetX, params.y)
-    }
-
-    private fun animateBallTo(
-        ball: ImageView,
-        params: WindowManager.LayoutParams,
-        targetX: Int,
-        targetY: Int
-    ) {
-        val startX = params.x
-        val startY = params.y
-        val steps = 8
-        var step = 0
-        val runnable = object : Runnable {
-            override fun run() {
-                step++
-                val fraction = step.toFloat() / steps
-                params.x = (startX + (targetX - startX) * fraction).toInt()
-                params.y = (startY + (targetY - startY) * fraction).toInt()
-                runCatching { windowManager.updateViewLayout(ball, params) }
-                if (step < steps) mainHandler.postDelayed(this, 12L)
-            }
-        }
-        mainHandler.post(runnable)
+        val maxX = (resources.displayMetrics.widthPixels - ballSize).coerceAtLeast(0)
+        val maxY = (resources.displayMetrics.heightPixels - ballSize).coerceAtLeast(0)
+        return x.coerceIn(0, maxX) to y.coerceIn(0, maxY)
     }
 
     private fun onBallTapped() {

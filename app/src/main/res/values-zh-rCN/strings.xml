@@ -101,4 +101,21 @@
     <string name="audio_source">音频来源</string>
     <string name="lossless_audio_microphone_only">仅话筒音频来源可用。</string>
     <string name="no_sufficient_permissions">没有足够的权限开始录制</string>
+    <string name="section_general">通用</string>
+    <string name="section_audio_recording">录音</string>
+    <string name="section_video_recording">录制视频</string>
+    <string name="section_audio">声音</string>
+    <string name="section_video">画面</string>
+    <string name="section_other">其他</string>
+    <string name="audio_bitrate">音频比特率</string>
+    <string name="video_bitrate">视频比特率</string>
+    <string name="video_codec">视频编码器</string>
+    <string name="internal_audio_fixed_format">内部音频固定为 48 kHz 立体声，采样率与声道仅对话筒有效。</string>
+    <string name="value_range_hint">范围：%1$d – %2$d</string>
+    <string name="value_out_of_range">请输入 %1$d – %2$d 之间的数值</string>
+    <string name="sample_rate_nonstandard">非标准采样率，部分机型可能无法录制</string>
+    <string name="sample_rate_hint">范围：8000 – 48000 Hz</string>
+    <string name="audio_bitrate_hint">单位 bps，范围 16000 – 320000（1 Mbps = 1,000,000）</string>
+    <string name="video_bitrate_hint">单位 bps，范围 100000 – 50000000（1 Mbps = 1,000,000）</string>
+    <string name="swipe_right_hint">可向右划动</string>
 </resources>

@@ -108,4 +108,21 @@
     <string name="audio_source">Audio source</string>
     <string name="lossless_audio_microphone_only">Only available with the microphone audio source.</string>
     <string name="no_sufficient_permissions">No sufficient permissions to start recording</string>
+    <string name="section_general">General</string>
+    <string name="section_audio_recording">Audio recording</string>
+    <string name="section_video_recording">Video recording</string>
+    <string name="section_audio">Audio</string>
+    <string name="section_video">Video</string>
+    <string name="section_other">Other</string>
+    <string name="audio_bitrate">Audio bitrate</string>
+    <string name="video_bitrate">Video bitrate</string>
+    <string name="video_codec">Video codec</string>
+    <string name="internal_audio_fixed_format">Internal audio is always captured at 48 kHz stereo. Sample rate and channels only apply to the microphone.</string>
+    <string name="value_range_hint">Range: %1$d – %2$d</string>
+    <string name="value_out_of_range">Enter a value between %1$d and %2$d</string>
+    <string name="sample_rate_nonstandard">Non-standard sample rate; some devices may fail to record</string>
+    <string name="sample_rate_hint">Range: 8000 – 48000 Hz</string>
+    <string name="audio_bitrate_hint">Unit: bps, range 16000 – 320000 (1 Mbps = 1,000,000)</string>
+    <string name="video_bitrate_hint">Unit: bps, range 100000 – 50000000 (1 Mbps = 1,000,000)</string>
+    <string name="swipe_right_hint">Swipe right for more</string>
 </resources>

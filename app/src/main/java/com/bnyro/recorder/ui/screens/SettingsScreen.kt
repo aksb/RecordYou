@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -62,6 +64,15 @@ private val BITRATE_PRESETS = listOf(BITRATE_PRESET_LOW, BITRATE_PRESET_MEDIUM, 
 // Not a real bitrate value, never persisted - only used to tell the "自定义"
 // chip apart from the others in the selector below.
 private const val CUSTOM_BITRATE_SENTINEL = -2
+// AAC-LC 常用采样率，填写其它值时仅提示不阻止
+private val SAMPLE_RATE_STANDARD_VALUES =
+    listOf(8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000)
+private val SAMPLE_RATE_RANGE = 8000..48000
+private val AUDIO_BITRATE_RANGE = 16_000..320_000
+private val AUDIO_BITRATE_QUICK_VALUES = listOf(64_000, 96_000, 128_000, 192_000, 256_000)
+private val VIDEO_BITRATE_RANGE = 100_000..50_000_000
+private val VIDEO_BITRATE_QUICK_VALUES = listOf(1_500_000, 4_000_000, 8_000_000, 12_000_000, 20_000_000)
+private val VIDEO_BITRATE_QUICK_LABELS = listOf("1.5M", "4M", "8M", "12M", "20M")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,10 +85,31 @@ fun SettingsScreen() {
             )
         )
     }
-    var screenAudioSource by remember {
+    var audioSource by remember {
         mutableStateOf(
             AudioSource.fromInt(
                 Preferences.prefs.getInt(Preferences.audioSourceKey, AudioSource.MICROPHONE.value)
+            )
+        )
+    }
+    // 录屏使用独立的音频参数，与录音互不影响
+    var videoAudioChannels by remember {
+        mutableStateOf(
+            AudioChannels.fromInt(
+                Preferences.prefs.getInt(
+                    Preferences.videoAudioChannelsKey,
+                    AudioChannels.MONO.value
+                )
+            )
+        )
+    }
+    var videoAudioSource by remember {
+        mutableStateOf(
+            AudioSource.fromInt(
+                Preferences.prefs.getInt(
+                    Preferences.videoAudioSourceKey,
+                    AudioSource.MICROPHONE.value
+                )
             )
         )
     }
@@ -128,11 +160,7 @@ fun SettingsScreen() {
                 .padding(horizontal = 16.dp)
                 .verticalScroll(scrollState)
         ) {
-            Text(
-                text = stringResource(R.string.directory),
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
-            )
+            SectionTitle(stringResource(R.string.section_general))
             Spacer(modifier = Modifier.height(5.dp))
             Button(
                 onClick = {
@@ -145,17 +173,54 @@ fun SettingsScreen() {
                 Text(stringResource(R.string.choose_dir))
             }
             Spacer(modifier = Modifier.height(10.dp))
+            NamingPatternPref()
+
+            SectionDivider()
+            SectionTitle(stringResource(R.string.section_audio_recording))
+            Spacer(modifier = Modifier.height(5.dp))
+            val audioSourceValues = AudioSource.values().map { it.value }
+            ChipSelector(
+                title = stringResource(R.string.audio_source),
+                entries = listOf(
+                    R.string.microphone,
+                    R.string.internal_audio_playback,
+                    R.string.microphone_and_internal_audio
+                ).map {
+                    stringResource(it)
+                },
+                values = audioSourceValues,
+                selections = listOf(audioSource.value)
+            ) { index, newValue ->
+                if (newValue) {
+                    audioSource = AudioSource.fromInt(audioSourceValues[index])
+                    Preferences.edit {
+                        putInt(Preferences.audioSourceKey, audioSourceValues[index])
+                        // 无损 WAV 仅话筒模式可用
+                        if (audioSource != AudioSource.MICROPHONE) {
+                            putBoolean(Preferences.losslessRecorderKey, false)
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
             Row {
                 CustomNumInputPref(
                     key = Preferences.audioSampleRateKey,
                     title = stringResource(R.string.sample_rate),
-                    defValue = 44_100
+                    defValue = 44_100,
+                    valueRange = SAMPLE_RATE_RANGE,
+                    standardValues = SAMPLE_RATE_STANDARD_VALUES,
+                    quickValues = SAMPLE_RATE_STANDARD_VALUES,
+                    hintText = stringResource(R.string.sample_rate_hint)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 CustomNumInputPref(
                     key = Preferences.audioBitrateKey,
-                    title = stringResource(R.string.bitrate),
-                    defValue = 192_000
+                    title = stringResource(R.string.audio_bitrate),
+                    defValue = 192_000,
+                    valueRange = AUDIO_BITRATE_RANGE,
+                    quickValues = AUDIO_BITRATE_QUICK_VALUES,
+                    hintText = stringResource(R.string.audio_bitrate_hint)
                 )
             }
             val audioChannelsValues = AudioChannels.values().map { it.value }
@@ -174,7 +239,27 @@ fun SettingsScreen() {
                 }
             }
             Spacer(modifier = Modifier.height(10.dp))
-            val audioValues = AudioSource.values().map { it.value }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                CheckboxPref(
+                    prefKey = Preferences.losslessRecorderKey,
+                    title = stringResource(R.string.lossless_audio),
+                    summary = stringResource(
+                        if (audioSource == AudioSource.MICROPHONE) {
+                            R.string.lossless_audio_desc
+                        } else {
+                            R.string.lossless_audio_microphone_only
+                        }
+                    ),
+                    enabled = audioSource == AudioSource.MICROPHONE
+                )
+            }
+
+            SectionDivider()
+            SectionTitle(stringResource(R.string.section_video_recording))
+            Spacer(modifier = Modifier.height(5.dp))
+            SubSectionTitle(stringResource(R.string.section_audio))
+            Spacer(modifier = Modifier.height(5.dp))
+            val videoAudioSourceValues = AudioSource.values().map { it.value }
             ChipSelector(
                 title = stringResource(R.string.audio_source),
                 entries = listOf(
@@ -184,21 +269,70 @@ fun SettingsScreen() {
                 ).map {
                     stringResource(it)
                 },
-                values = audioValues,
-                selections = listOf(screenAudioSource.value)
+                values = videoAudioSourceValues,
+                selections = listOf(videoAudioSource.value)
             ) { index, newValue ->
                 if (newValue) {
-                    screenAudioSource = AudioSource.fromInt(audioValues[index])
+                    videoAudioSource = AudioSource.fromInt(videoAudioSourceValues[index])
                     Preferences.edit {
-                        putInt(Preferences.audioSourceKey, audioValues[index])
-                        // 无损 WAV 仅话筒模式可用
-                        if (screenAudioSource != AudioSource.MICROPHONE) {
-                            putBoolean(Preferences.losslessRecorderKey, false)
-                        }
+                        putInt(Preferences.videoAudioSourceKey, videoAudioSourceValues[index])
                     }
                 }
             }
+            Spacer(modifier = Modifier.height(10.dp))
+            // 内部音频固定为 48 kHz 立体声，采样率与声道仅对话筒来源生效
+            val microphoneSource = videoAudioSource == AudioSource.MICROPHONE
+            Row {
+                CustomNumInputPref(
+                    key = Preferences.videoAudioSampleRateKey,
+                    title = stringResource(R.string.sample_rate),
+                    defValue = 44_100,
+                    enabled = microphoneSource,
+                    valueRange = SAMPLE_RATE_RANGE,
+                    standardValues = SAMPLE_RATE_STANDARD_VALUES,
+                    quickValues = SAMPLE_RATE_STANDARD_VALUES,
+                    hintText = stringResource(R.string.sample_rate_hint)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                CustomNumInputPref(
+                    key = Preferences.videoAudioBitrateKey,
+                    title = stringResource(R.string.audio_bitrate),
+                    defValue = 192_000,
+                    valueRange = AUDIO_BITRATE_RANGE,
+                    quickValues = AUDIO_BITRATE_QUICK_VALUES,
+                    hintText = stringResource(R.string.audio_bitrate_hint)
+                )
+            }
             ChipSelector(
+                entries = listOf(R.string.mono, R.string.stereo).map {
+                    stringResource(it)
+                },
+                values = AudioChannels.values().map { it.value },
+                selections = listOf(videoAudioChannels.value),
+                enabled = microphoneSource
+            ) { index, newValue ->
+                if (newValue) {
+                    val value = AudioChannels.values()[index].value
+                    videoAudioChannels = AudioChannels.fromInt(value)
+                    Preferences.edit {
+                        putInt(Preferences.videoAudioChannelsKey, value)
+                    }
+                }
+            }
+            if (!microphoneSource) {
+                Spacer(modifier = Modifier.height(5.dp))
+                Text(
+                    text = stringResource(R.string.internal_audio_fixed_format),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(15.dp))
+            SubSectionTitle(stringResource(R.string.section_video))
+            Spacer(modifier = Modifier.height(5.dp))
+            ChipSelector(
+                title = stringResource(R.string.video_codec),
                 entries = VideoFormat.codecs.map { it.name },
                 values = VideoFormat.codecs.map { it.codec },
                 selections = listOf(videoEncoder.codec)
@@ -246,7 +380,7 @@ fun SettingsScreen() {
                 mutableStateOf(if (customBitrateSelected) videoBitrate.toString() else "")
             }
             ChipSelector(
-                title = stringResource(R.string.bitrate),
+                title = stringResource(R.string.video_bitrate),
                 entries = listOf(
                     stringResource(R.string.quality_low),
                     stringResource(R.string.quality_medium),
@@ -283,56 +417,71 @@ fun SettingsScreen() {
             }
             if (customBitrateSelected) {
                 Spacer(modifier = Modifier.height(5.dp))
+                val customBitrateValue = customBitrateInput.toIntOrNull()
+                val customBitrateValid =
+                    customBitrateValue != null && customBitrateValue in VIDEO_BITRATE_RANGE
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         modifier = Modifier.padding(horizontal = 5.dp),
                         value = customBitrateInput,
                         onValueChange = { customBitrateInput = it },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        label = { Text(stringResource(R.string.bitrate)) }
+                        isError = customBitrateInput.isNotEmpty() && !customBitrateValid,
+                        label = { Text(stringResource(R.string.video_bitrate)) },
+                        supportingText = {
+                            Text(
+                                if (customBitrateInput.isNotEmpty() && !customBitrateValid) {
+                                    stringResource(
+                                        R.string.value_out_of_range,
+                                        VIDEO_BITRATE_RANGE.first,
+                                        VIDEO_BITRATE_RANGE.last
+                                    )
+                                } else {
+                                    stringResource(R.string.video_bitrate_hint)
+                                }
+                            )
+                        }
                     )
                     Spacer(modifier = Modifier.width(5.dp))
-                    Button(onClick = {
-                        customBitrateInput.toIntOrNull()?.takeIf { it > 0 }?.let {
-                            videoBitrate = it
-                            Preferences.edit { putInt(Preferences.videoBitrateKey, it) }
-                        }
-                    }) {
+                    Button(
+                        onClick = {
+                            customBitrateValue?.let {
+                                videoBitrate = it
+                                Preferences.edit { putInt(Preferences.videoBitrateKey, it) }
+                            }
+                        },
+                        enabled = customBitrateValid
+                    ) {
                         Text(stringResource(R.string.save))
                     }
                 }
+                Spacer(modifier = Modifier.height(5.dp))
+                ChipSelector(
+                    entries = VIDEO_BITRATE_QUICK_LABELS,
+                    values = VIDEO_BITRATE_QUICK_VALUES,
+                    selections = listOfNotNull(customBitrateValue)
+                ) { index, selected ->
+                    if (selected) customBitrateInput = VIDEO_BITRATE_QUICK_VALUES[index].toString()
+                }
             }
-            Spacer(modifier = Modifier.height(10.dp))
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                CheckboxPref(
-                    prefKey = Preferences.losslessRecorderKey,
-                    title = stringResource(R.string.lossless_audio),
-                    summary = stringResource(
-                        if (screenAudioSource == AudioSource.MICROPHONE) {
-                            R.string.lossless_audio_desc
-                        } else {
-                            R.string.lossless_audio_microphone_only
-                        }
-                    ),
-                    enabled = screenAudioSource == AudioSource.MICROPHONE
-                )
-            }
-            Spacer(modifier = Modifier.height(10.dp))
+
+            SectionDivider()
+            SectionTitle(stringResource(R.string.section_other))
+            Spacer(modifier = Modifier.height(5.dp))
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 CheckboxPref(
                     prefKey = Preferences.showOverlayAnnotationToolKey,
                     title = stringResource(R.string.screen_recorder_annotation),
                     summary = stringResource(R.string.screen_recorder_annotation_desc)
                 )
+                Spacer(modifier = Modifier.height(10.dp))
             }
-            Spacer(modifier = Modifier.height(10.dp))
             CheckboxPref(
                 prefKey = Preferences.showVisualizerTimestamps,
                 title = stringResource(R.string.audio_visualizer_timestamps),
                 summary = stringResource(R.string.audio_visualizer_timestamps_description)
             )
             Spacer(modifier = Modifier.height(10.dp))
-            NamingPatternPref()
         }
     }
 
@@ -359,4 +508,30 @@ fun SettingsScreen() {
             showAbout = false
         }
     }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        fontWeight = FontWeight.Bold,
+        fontSize = 22.sp
+    )
+}
+
+@Composable
+private fun SectionDivider() {
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Spacer(modifier = Modifier.height(16.dp))
+}
+
+@Composable
+private fun SubSectionTitle(text: String) {
+    Text(
+        text = text,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp,
+        color = MaterialTheme.colorScheme.primary
+    )
 }

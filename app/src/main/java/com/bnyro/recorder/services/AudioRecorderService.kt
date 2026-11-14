@@ -92,10 +92,9 @@ class AudioRecorderService : RecorderService() {
             if (sampleRatePref != null) {
                 setAudioSamplingRate(sampleRatePref)
             }
+            // 比特率为“自动”时交给系统决定，避免用采样率推算出一个异常高的码率
             if (audioBitrate != null) {
                 setAudioEncodingBitRate(audioBitrate)
-            } else if (sampleRatePref != null) {
-                setAudioEncodingBitRate(sampleRatePref * 32 * 2)
             }
 
             Preferences.prefs.getInt(Preferences.audioChannelsKey, AudioChannels.MONO.value).let {
@@ -153,6 +152,7 @@ class AudioRecorderService : RecorderService() {
                 descriptor,
                 includeMicrophone,
                 Preferences.prefs.getInt(Preferences.audioBitrateKey, 192_000)
+                    .takeIf { it > 0 } ?: 192_000
             ).also {
                 it.start()
                 systemAudioRecorder = it

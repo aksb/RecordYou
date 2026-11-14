@@ -59,7 +59,7 @@ class ScreenRecorderService : RecorderService() {
         get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val audioSource = AudioSource.fromInt(
                 Preferences.prefs.getInt(
-                    Preferences.audioSourceKey,
+                    Preferences.videoAudioSourceKey,
                     AudioSource.MICROPHONE.value
                 )
             )
@@ -118,7 +118,7 @@ class ScreenRecorderService : RecorderService() {
 
     private fun startCapture() {
         val audioSource = AudioSource.fromInt(
-            Preferences.prefs.getInt(Preferences.audioSourceKey, AudioSource.MICROPHONE.value)
+            Preferences.prefs.getInt(Preferences.videoAudioSourceKey, AudioSource.MICROPHONE.value)
         )
         val needsSystemAudio = audioSource != AudioSource.MICROPHONE
         val includeMicrophone = audioSource == AudioSource.MICROPHONE_AND_INTERNAL
@@ -147,17 +147,20 @@ class ScreenRecorderService : RecorderService() {
 
                 // Sample rate / bitrate / channel count must be set after
                 // setOutputFormat() + setAudioEncoder(), not before.
-                Preferences.prefs.getInt(Preferences.audioSampleRateKey, -1).takeIf {
+                Preferences.prefs.getInt(Preferences.videoAudioSampleRateKey, -1).takeIf {
                     it > 0
                 }?.let {
                     setAudioSamplingRate(it)
-                    setAudioEncodingBitRate(it * 32 * 2)
                 }
 
-                Preferences.prefs.getInt(Preferences.audioBitrateKey, -1).takeIf { it > 0 }?.let {
-                    setAudioEncodingBitRate(it)
-                }
-                Preferences.prefs.getInt(Preferences.audioChannelsKey, AudioChannels.MONO.value).let {
+                Preferences.prefs.getInt(Preferences.videoAudioBitrateKey, -1).takeIf { it > 0 }
+                    ?.let {
+                        setAudioEncodingBitRate(it)
+                    }
+                Preferences.prefs.getInt(
+                    Preferences.videoAudioChannelsKey,
+                    AudioChannels.MONO.value
+                ).let {
                     setAudioChannels(it)
                 }
             }
@@ -234,7 +237,8 @@ class ScreenRecorderService : RecorderService() {
                 mediaProjection!!,
                 audioDescriptor,
                 includeMicrophone,
-                Preferences.prefs.getInt(Preferences.audioBitrateKey, 192_000)
+                Preferences.prefs.getInt(Preferences.videoAudioBitrateKey, 192_000)
+                    .takeIf { it > 0 } ?: 192_000
             ).also {
                 it.start()
                 audioStartNanos = it.startNanos

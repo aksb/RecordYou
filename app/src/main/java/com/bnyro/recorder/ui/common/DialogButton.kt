@@ -9,13 +9,14 @@ import androidx.compose.ui.platform.LocalView
 @Composable
 fun DialogButton(
     text: String,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     val view = LocalView.current
     TextButton(onClick = {
         view.playSoundEffect(SoundEffectConstants.CLICK)
         onClick.invoke()
-    }) {
+    }, enabled = enabled) {
         Text(text)
     }
 }
