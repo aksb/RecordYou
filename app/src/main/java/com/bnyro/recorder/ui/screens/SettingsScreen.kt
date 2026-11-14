@@ -41,11 +41,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.AudioChannels
-import com.bnyro.recorder.enums.AudioDeviceSource
 import com.bnyro.recorder.enums.AudioSource
 import com.bnyro.recorder.enums.ThemeMode
 import com.bnyro.recorder.enums.VideoFormat
-import com.bnyro.recorder.obj.AudioFormat
 import com.bnyro.recorder.ui.common.CheckboxPref
 import com.bnyro.recorder.ui.common.ChipSelector
 import com.bnyro.recorder.ui.common.ClickableIcon
@@ -69,9 +67,6 @@ private const val CUSTOM_BITRATE_SENTINEL = -2
 @Composable
 fun SettingsScreen() {
     val themeModel: ThemeModel = viewModel(LocalContext.current as ComponentActivity)
-    var audioFormat by remember {
-        mutableStateOf(AudioFormat.getCurrent())
-    }
     var audioChannels by remember {
         mutableStateOf(
             AudioChannels.fromInt(
@@ -79,19 +74,11 @@ fun SettingsScreen() {
             )
         )
     }
-    var audioDeviceSource by remember {
-        mutableStateOf(
-            AudioDeviceSource.fromInt(
-                Preferences.prefs.getInt(
-                    Preferences.audioDeviceSourceKey,
-                    AudioDeviceSource.DEFAULT.value
-                )
-            )
-        )
-    }
     var screenAudioSource by remember {
         mutableStateOf(
-            AudioSource.fromInt(Preferences.prefs.getInt(Preferences.audioSourceKey, 0))
+            AudioSource.fromInt(
+                Preferences.prefs.getInt(Preferences.audioSourceKey, AudioSource.MICROPHONE.value)
+            )
         )
     }
     var videoEncoder by remember {
@@ -158,17 +145,6 @@ fun SettingsScreen() {
                 Text(stringResource(R.string.choose_dir))
             }
             Spacer(modifier = Modifier.height(10.dp))
-            ChipSelector(
-                title = stringResource(R.string.audio_format),
-                entries = AudioFormat.formats.map { it.name },
-                values = AudioFormat.formats.map { it.format },
-                selections = listOf(audioFormat.format)
-            ) { index, newValue ->
-                if (newValue) {
-                    audioFormat = AudioFormat.formats[index]
-                    Preferences.edit { putString(Preferences.audioFormatKey, audioFormat.name) }
-                }
-            }
             Row {
                 CustomNumInputPref(
                     key = Preferences.audioSampleRateKey,
@@ -181,29 +157,6 @@ fun SettingsScreen() {
                     title = stringResource(R.string.bitrate),
                     defValue = 192_000
                 )
-            }
-            val audioDeviceSourceValues = AudioDeviceSource.values().map { it.value }
-            ChipSelector(
-                entries = listOf(
-                    R.string.default_audio,
-                    R.string.microphone,
-                    R.string.camcorder,
-                    R.string.unprocessed,
-                    R.string.internal_audio
-                ).map {
-                    stringResource(it)
-                },
-                values = audioDeviceSourceValues,
-                selections = listOf(audioDeviceSource.value)
-            ) { index, newValue ->
-                if (newValue) {
-                    audioDeviceSource = AudioDeviceSource.fromInt(
-                        audioDeviceSourceValues[index]
-                    )
-                    Preferences.edit {
-                        putInt(Preferences.audioDeviceSourceKey, audioDeviceSourceValues[index])
-                    }
-                }
             }
             val audioChannelsValues = AudioChannels.values().map { it.value }
             ChipSelector(
@@ -223,8 +176,12 @@ fun SettingsScreen() {
             Spacer(modifier = Modifier.height(10.dp))
             val audioValues = AudioSource.values().map { it.value }
             ChipSelector(
-                title = stringResource(R.string.screen_recorder),
-                entries = listOf(R.string.no_audio, R.string.microphone).map {
+                title = stringResource(R.string.audio_source),
+                entries = listOf(
+                    R.string.microphone,
+                    R.string.internal_audio_playback,
+                    R.string.microphone_and_internal_audio
+                ).map {
                     stringResource(it)
                 },
                 values = audioValues,
@@ -232,7 +189,13 @@ fun SettingsScreen() {
             ) { index, newValue ->
                 if (newValue) {
                     screenAudioSource = AudioSource.fromInt(audioValues[index])
-                    Preferences.edit { putInt(Preferences.audioSourceKey, audioValues[index]) }
+                    Preferences.edit {
+                        putInt(Preferences.audioSourceKey, audioValues[index])
+                        // 无损 WAV 仅话筒模式可用
+                        if (screenAudioSource != AudioSource.MICROPHONE) {
+                            putBoolean(Preferences.losslessRecorderKey, false)
+                        }
+                    }
                 }
             }
             ChipSelector(
@@ -344,7 +307,14 @@ fun SettingsScreen() {
                 CheckboxPref(
                     prefKey = Preferences.losslessRecorderKey,
                     title = stringResource(R.string.lossless_audio),
-                    summary = stringResource(R.string.lossless_audio_desc)
+                    summary = stringResource(
+                        if (screenAudioSource == AudioSource.MICROPHONE) {
+                            R.string.lossless_audio_desc
+                        } else {
+                            R.string.lossless_audio_microphone_only
+                        }
+                    ),
+                    enabled = screenAudioSource == AudioSource.MICROPHONE
                 )
             }
             Spacer(modifier = Modifier.height(10.dp))

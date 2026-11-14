@@ -8,12 +8,10 @@ object Preferences {
     lateinit var prefs: SharedPreferences
 
     const val targetFolderKey = "targetFolder"
-    const val audioFormatKey = "audioFormat"
     const val audioSourceKey = "audioSource"
     const val audioSampleRateKey = "audioSampleRate"
     const val audioBitrateKey = "audioBitrate"
     const val audioChannelsKey = "audioChannels"
-    const val audioDeviceSourceKey = "audioDeviceSource"
     const val videoCodecKey = "videoCodec"
     const val videoBitrateKey = "videoBitrate"
     const val themeModeKey = "themeMode"
@@ -22,12 +20,13 @@ object Preferences {
     const val showOverlayAnnotationToolKey = "annotationTool"
     const val showVisualizerTimestamps = "visualizerTimestamp"
     const val floatingBallKey = "floatingBall"
-    const val floatingBallHintDismissedKey = "floatingBallHintDismissed"
     const val videoResolutionKey = "videoResolution"
     const val ballPosXPortraitKey = "ballPosXPortrait"
     const val ballPosYPortraitKey = "ballPosYPortrait"
     const val ballPosXLandscapeKey = "ballPosXLandscape"
     const val ballPosYLandscapeKey = "ballPosYLandscape"
+    const val annotationXKey = "annotationX"
+    const val annotationYKey = "annotationY"
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREF_FILE_NAME, Context.MODE_PRIVATE)

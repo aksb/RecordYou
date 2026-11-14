@@ -105,18 +105,6 @@ class LosslessRecorderService : RecorderService() {
         return amps
     }
 
-    @RequiresApi(Build.VERSION_CODES.N)
-    override fun pause() {
-        super.pause()
-        audioRecorder?.stop()
-    }
-
-    @RequiresApi(Build.VERSION_CODES.N)
-    override fun resume() {
-        super.resume()
-        audioRecorder?.startRecording()
-    }
-
     private fun convertToWav() {
         val inputStream = contentResolver.openInputStream(outputFile?.uri ?: return) ?: return
         val outputStream = (application as App).fileRepository

@@ -56,11 +56,9 @@ import com.bnyro.recorder.enums.SortOrder
 import com.bnyro.recorder.ui.Destination
 import com.bnyro.recorder.ui.common.ClickableIcon
 import com.bnyro.recorder.ui.dialogs.ConfirmationDialog
-import com.bnyro.recorder.ui.dialogs.FloatingBallHintDialog
 import com.bnyro.recorder.ui.models.PlayerModel
 import com.bnyro.recorder.ui.models.RecorderModel
 import com.bnyro.recorder.util.FloatingBallHelper
-import com.bnyro.recorder.util.Preferences
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -112,11 +110,7 @@ fun HomeScreen(
     }
 
     var showDeleteDialog by remember { mutableStateOf(false) }
-    var showFloatingBallHintDialog by remember { mutableStateOf(false) }
 
-    // Turning the ball on for real - shared by the "confirm" button of the
-    // hint dialog and by the direct-enable path when the hint has already
-    // been dismissed for good.
     fun enableFloatingBall() {
         if (FloatingBallHelper.setEnabled(context, true)) {
             floatingBallEnabled = true
@@ -130,18 +124,11 @@ fun HomeScreen(
                     onClick = {
                         view.playSoundEffect(SoundEffectConstants.CLICK)
                         if (floatingBallEnabled) {
-                            // Turning the ball off never needs the hint.
                             if (FloatingBallHelper.setEnabled(context, false)) {
                                 floatingBallEnabled = false
                             }
-                        } else if (Preferences.prefs.getBoolean(
-                                Preferences.floatingBallHintDismissedKey,
-                                false
-                            )
-                        ) {
-                            enableFloatingBall()
                         } else {
-                            showFloatingBallHintDialog = true
+                            enableFloatingBall()
                         }
                     }
                 ) {
@@ -309,18 +296,6 @@ fun HomeScreen(
             onDismissRequest = { showDeleteDialog = false }
         ) {
             playerModel.deleteFiles(fallbackItems = currentItems)
-        }
-    }
-
-    if (showFloatingBallHintDialog) {
-        FloatingBallHintDialog(
-            onDismissRequest = { showFloatingBallHintDialog = false }
-        ) { dontShowAgain ->
-            if (dontShowAgain) {
-                Preferences.edit { putBoolean(Preferences.floatingBallHintDismissedKey, true) }
-            }
-            showFloatingBallHintDialog = false
-            enableFloatingBall()
         }
     }
 }

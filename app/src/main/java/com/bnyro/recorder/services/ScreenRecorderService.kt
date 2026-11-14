@@ -2,6 +2,7 @@ package com.bnyro.recorder.services
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
@@ -9,56 +10,62 @@ import android.media.MediaRecorder
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
 import android.widget.Toast
 import androidx.activity.result.ActivityResult
+import androidx.annotation.RequiresApi
 import com.bnyro.recorder.App
 import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.AudioChannels
-import com.bnyro.recorder.enums.AudioDeviceSource
 import com.bnyro.recorder.enums.AudioSource
 import com.bnyro.recorder.enums.VideoFormat
 import com.bnyro.recorder.obj.VideoResolution
+import com.bnyro.recorder.util.MediaMerger
 import com.bnyro.recorder.util.PlayerHelper
 import com.bnyro.recorder.util.Preferences
+import com.bnyro.recorder.util.SystemAudioRecorder
+import java.io.File
 
 class ScreenRecorderService : RecorderService() {
     override val notificationTitle: String
         get() = getString(R.string.recording_screen)
 
-    // Keep the Bluetooth headset on the normal media (A2DP) profile while
-    // screen recording, otherwise its playback goes silent. See
-    // RecorderService.allowBluetoothSco.
-    override val allowBluetoothSco: Boolean = false
-
     private var virtualDisplay: VirtualDisplay? = null
     private var mediaProjection: MediaProjection? = null
     private var activityResult: ActivityResult? = null
+    private var systemAudioRecorder: SystemAudioRecorder? = null
+
+    private var tempVideoFile: File? = null
+    private var tempVideoDescriptor: ParcelFileDescriptor? = null
+    private var tempAudioFile: File? = null
+    private var videoStartNanos = 0L
+    private var audioStartNanos = 0L
+    private var isDestroying = false
+    private var startDelayMs = 0L
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startDelayMs = intent?.getLongExtra(START_DELAY_EXTRA_KEY, 0L) ?: 0L
+        return super.onStartCommand(intent, flags, startId)
+    }
+
     override val fgServiceType: Int?
         get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val usesMicrophone = Preferences.prefs.getInt(
-                Preferences.audioSourceKey,
-                AudioSource.NONE.value
-            ) == AudioSource.MICROPHONE.value
+            val audioSource = AudioSource.fromInt(
+                Preferences.prefs.getInt(
+                    Preferences.audioSourceKey,
+                    AudioSource.MICROPHONE.value
+                )
+            )
+            val usesMicrophone = audioSource == AudioSource.MICROPHONE ||
+                audioSource == AudioSource.MICROPHONE_AND_INTERNAL
             if (usesMicrophone) {
-                // Screen recording with "microphone audio" enabled captures
-                // the mic in addition to the screen, but this service was
-                // only ever declared/started as a "mediaProjection" type
-                // foreground service - never "microphone" too. On at least
-                // some devices/ROMs, Android's audio policy silences a
-                // background app's mic capture unless the foreground
-                // service that's using the mic is actually declared with
-                // the "microphone" type (see AndroidManifest.xml, which now
-                // declares both types on this service to match). This is
-                // very likely the root cause of recordings that randomly go
-                // silent after a few seconds once the app is backgrounded.
-                // Applied from Q onwards (both type constants exist since
-                // API 29) - deliberately NOT gated behind Android 14 the
-                // way AudioRecorderService's own microphone type is, since
-                // this needs to actually take effect on Android 13 devices
-                // to be testable/useful there.
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             } else {
@@ -85,9 +92,11 @@ class ScreenRecorderService : RecorderService() {
         } catch (e: Exception) {
             Log.e("Media Projection Error", e.toString())
             onDestroy()
+            return
         }
+        val projection = mediaProjection ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            mediaProjection!!.registerCallback(object : MediaProjection.Callback() {
+            projection.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
                     onDestroy()
                 }
@@ -96,22 +105,33 @@ class ScreenRecorderService : RecorderService() {
     }
 
     override fun start() {
+        // 需要等待时先挂起真正的采集，避免把"授权弹窗关闭后回到上个应用"
+        // 的过渡动画录进视频的开头
+        if (startDelayMs > 0) {
+            mainHandler.postDelayed({
+                if (!isDestroying) startCapture()
+            }, startDelayMs)
+        } else {
+            startCapture()
+        }
+    }
+
+    private fun startCapture() {
         val audioSource = AudioSource.fromInt(
-            Preferences.prefs.getInt(Preferences.audioSourceKey, 0)
+            Preferences.prefs.getInt(Preferences.audioSourceKey, AudioSource.MICROPHONE.value)
         )
+        val needsSystemAudio = audioSource != AudioSource.MICROPHONE
+        val includeMicrophone = audioSource == AudioSource.MICROPHONE_AND_INTERNAL
+
         val resolution = getScreenResolution()
         val videoFormat = VideoFormat.getCurrent()
 
         recorder = PlayerHelper.newRecorder(this).apply {
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
 
-            if (audioSource == AudioSource.MICROPHONE) {
-                Preferences.prefs.getInt(
-                    Preferences.audioDeviceSourceKey,
-                    AudioDeviceSource.DEFAULT.value
-                ).let {
-                    setAudioSource(it)
-                }
+            if (!needsSystemAudio) {
+                // 话筒模式：音视频都交给 MediaRecorder，保持原有行为
+                setAudioSource(MediaRecorder.AudioSource.DEFAULT)
             }
 
             setOutputFormat(videoFormat.format)
@@ -122,16 +142,11 @@ class ScreenRecorderService : RecorderService() {
             val autoBitrate = (BPP * resolution.frameRate * resolution.width * resolution.height).toInt()
             setVideoEncodingBitRate(bitratePref.takeIf { it > 0 } ?: autoBitrate)
 
-            if (audioSource == AudioSource.MICROPHONE) {
+            if (!needsSystemAudio) {
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
 
                 // Sample rate / bitrate / channel count must be set after
-                // setOutputFormat() + setAudioEncoder(), not before -
-                // MediaRecorder's documented state machine only accepts
-                // these calls at this point. They used to be set earlier
-                // (right after setAudioSource()), which is out of order per
-                // the API contract even though it doesn't throw outright on
-                // every device.
+                // setOutputFormat() + setAudioEncoder(), not before.
                 Preferences.prefs.getInt(Preferences.audioSampleRateKey, -1).takeIf {
                     it > 0
                 }?.let {
@@ -160,27 +175,132 @@ class ScreenRecorderService : RecorderService() {
                 null
             )
 
-            outputFile = (application as App).fileRepository.getOutputFile(videoFormat.extension)
+            outputFile = (application as App).fileRepository.getOutputFile("mp4")
             if (outputFile == null) {
                 Toast.makeText(this@ScreenRecorderService, R.string.cant_access_selected_folder, Toast.LENGTH_LONG).show()
                 onDestroy()
                 return
             }
 
-            fileDescriptor = contentResolver.openFileDescriptor(outputFile!!.uri, "w")
-            setOutputFile(fileDescriptor?.fileDescriptor)
+            if (needsSystemAudio) {
+                // 视频先写到缓存文件，停止后再把音频轨合流进最终文件
+                val videoFile = File(cacheDir, "screen_video_${System.currentTimeMillis()}.mp4")
+                tempVideoFile = videoFile
+                tempVideoDescriptor = ParcelFileDescriptor.open(
+                    videoFile,
+                    ParcelFileDescriptor.MODE_READ_WRITE or
+                        ParcelFileDescriptor.MODE_CREATE or
+                        ParcelFileDescriptor.MODE_TRUNCATE
+                )
+                setOutputFile(tempVideoDescriptor!!.fileDescriptor)
+            } else {
+                fileDescriptor = contentResolver.openFileDescriptor(outputFile!!.uri, "w")
+                setOutputFile(fileDescriptor?.fileDescriptor)
+            }
 
             runCatching {
                 prepare()
             }
 
             start()
+            videoStartNanos = SystemClock.elapsedRealtimeNanos()
 
             virtualDisplay?.surface = surface
         }
 
+        if (needsSystemAudio && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startSystemAudioCapture(includeMicrophone)
+        }
+
         super.start()
     }
+
+    /**
+     * 内部/混合音频模式：视频轨仍由 MediaRecorder 负责（不设置音频源），
+     * 音频轨通过播放捕获单独编码成 m4a，停止后合流进 mp4。
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun startSystemAudioCapture(includeMicrophone: Boolean) {
+        val audioFile = File(cacheDir, "screen_audio_${System.currentTimeMillis()}.m4a")
+        tempAudioFile = audioFile
+        val audioDescriptor = ParcelFileDescriptor.open(
+            audioFile,
+            ParcelFileDescriptor.MODE_READ_WRITE or
+                ParcelFileDescriptor.MODE_CREATE or
+                ParcelFileDescriptor.MODE_TRUNCATE
+        )
+        runCatching {
+            SystemAudioRecorder(
+                mediaProjection!!,
+                audioDescriptor,
+                includeMicrophone,
+                Preferences.prefs.getInt(Preferences.audioBitrateKey, 192_000)
+            ).also {
+                it.start()
+                audioStartNanos = it.startNanos
+                systemAudioRecorder = it
+            }
+        }.onFailure {
+            runCatching { audioDescriptor.close() }
+            Log.e(TAG, "Unable to capture internal audio", it)
+            Toast.makeText(this, R.string.internal_audio_failed, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    override suspend fun onRecordingStopped() {
+        val videoFile = tempVideoFile ?: return
+        runCatching { tempVideoDescriptor?.close() }
+        tempVideoDescriptor = null
+
+        val finalFile = outputFile
+        val audioFile = tempAudioFile
+        try {
+            if (finalFile != null) {
+                val merged = mergeInto(
+                    videoFile,
+                    audioFile,
+                    finalFile.uri
+                )
+                Log.i(
+                    "ScreenRecorderService",
+                    "合并结果=$merged 视频字节=${videoFile.length()} 音频字节=${audioFile?.length()}"
+                )
+                if (!merged) {
+                    // 合流失败时至少保留视频，避免用户什么都拿不到
+                    runCatching {
+                        contentResolver.openOutputStream(finalFile.uri)?.use { output ->
+                            videoFile.inputStream().use { it.copyTo(output) }
+                        }
+                    }
+                }
+            }
+        } finally {
+            runCatching { videoFile.delete() }
+            runCatching { audioFile?.delete() }
+            tempVideoFile = null
+            tempAudioFile = null
+        }
+    }
+
+    private fun mergeInto(
+        videoFile: File,
+        audioFile: File?,
+        outputUri: android.net.Uri
+    ): Boolean {
+        if (audioFile == null || audioFile.length() <= 0) return false
+        val output = contentResolver.openFileDescriptor(outputUri, "wt") ?: return false
+        return try {
+            val offsetUs = if (audioStartNanos > 0 && videoStartNanos > 0) {
+                ((audioStartNanos - videoStartNanos) / 1000).coerceIn(0L, 1_000_000L)
+            } else {
+                0L
+            }
+            MediaMerger.merge(videoFile, audioFile, output, offsetUs)
+        } finally {
+            runCatching { output.close() }
+        }
+    }
+
     private fun getScreenResolution(): VideoResolution {
         val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         val display = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
@@ -224,6 +344,17 @@ class ScreenRecorderService : RecorderService() {
     }
 
     override fun onDestroy() {
+        if (isDestroying) return
+        isDestroying = true
+
+        systemAudioRecorder?.let {
+            it.stop()
+            it.release()
+        }
+        systemAudioRecorder = null
+        // 临时视频文件的 fd 必须等 MediaRecorder 停止后再关闭（在
+        // onRecordingStopped 里处理），否则 moov 无法正常写入。
+
         super.onDestroy()
         virtualDisplay?.release()
         // Without this, the MediaProjection session (and the persistent
@@ -236,9 +367,11 @@ class ScreenRecorderService : RecorderService() {
         mediaProjection = null
     }
 
-    override fun getCurrentAmplitude() = recorder?.maxAmplitude
+    override fun getCurrentAmplitude(): Int? =
+        systemAudioRecorder?.currentAmplitude ?: recorder?.maxAmplitude
 
     companion object {
+        private const val TAG = "ScreenRecorderService"
         private const val BPP = 0.25f
     }
 }

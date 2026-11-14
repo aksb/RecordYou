@@ -31,6 +31,8 @@ import com.bnyro.recorder.util.Preferences
 class MainActivity : ComponentActivity() {
     private var initialRecorder = RecorderType.NONE
     private var exitAfterRecordingStart = false
+    private var pendingAudioRecording = false
+    private var launchedFromShortcut = false
     private lateinit var mProjectionManager: MediaProjectionManager
     private val recorderModel: RecorderModel by viewModels()
     private lateinit var launcher: ActivityResultLauncher<Intent>
@@ -41,7 +43,18 @@ class MainActivity : ComponentActivity() {
         launcher =
             registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
                 if (result.resultCode == Activity.RESULT_OK) {
-                    recorderModel.startVideoRecorder(this, result)
+                    if (pendingAudioRecording) {
+                        pendingAudioRecording = false
+                        recorderModel.startAudioRecorder(this, result)
+                    } else {
+                        // 从悬浮球/快捷方式启动时，授权弹窗关闭后本应用会马上退回后台，
+                        // 中间有一段任务切换动画；稍等下再开始采集，避免录进前几帧
+                        recorderModel.startVideoRecorder(
+                            this,
+                            result,
+                            if (launchedFromShortcut) SHORTCUT_START_DELAY_MS else 0L
+                        )
+                    }
                 }
             }
         mProjectionManager =
@@ -106,11 +119,18 @@ class MainActivity : ComponentActivity() {
             RecorderType.valueOf(it)
         } ?: RecorderType.NONE
         initialRecorder = initialRecorderType
+        launchedFromShortcut = initialRecorderType != RecorderType.NONE
         if (initialRecorderType == RecorderType.AUDIO) {
-            // audio recording starts synchronously (no system consent dialog needed
-            // once the mic permission is granted), so we can move the task back
-            // right away instead of waiting for a pause/resume cycle.
-            if (recorderModel.startAudioRecorder(this)) {
+            if (recorderModel.audioRequiresScreenCapture()) {
+                // 内部/混合音频需要先获取 MediaProjection 授权
+                if (recorderModel.hasScreenRecordingPermissions(this)) {
+                    pendingAudioRecording = true
+                    launcher.launch(mProjectionManager.createScreenCaptureIntent())
+                }
+            } else if (recorderModel.startAudioRecorder(this)) {
+                // audio recording starts synchronously (no system consent dialog needed
+                // once the mic permission is granted), so we can move the task back
+                // right away instead of waiting for a pause/resume cycle.
                 exitAfterRecordingStart = true
             }
         } else if (initialRecorderType == RecorderType.VIDEO) {
@@ -140,6 +160,10 @@ class MainActivity : ComponentActivity() {
         if (initialRecorder == RecorderType.VIDEO) {
             exitAfterRecordingStart = true
             initialRecorder = RecorderType.NONE
+        } else if (initialRecorder == RecorderType.AUDIO && pendingAudioRecording) {
+            // 正在等待内部音频的屏幕捕获授权，授权后直接退回后台
+            exitAfterRecordingStart = true
+            initialRecorder = RecorderType.NONE
         }
     }
 
@@ -154,5 +178,9 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_ACTION_KEY = "action"
         const val ACTION_ENABLE_FLOATING_BALL = "com.bnyro.recorder.action.ENABLE_FLOATING_BALL"
+
+        // 从悬浮球/快捷方式启动录屏时，晚一点再真正开始采集，
+        // 避开"授权弹窗关闭 -> 退回上个应用"的过渡动画
+        private const val SHORTCUT_START_DELAY_MS = 700L
     }
 }

@@ -7,14 +7,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.media.AudioDeviceInfo
-import android.media.AudioManager
 import android.media.MediaRecorder
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
-import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -44,40 +41,12 @@ abstract class RecorderService : LifecycleService() {
     var onRecorderStateChanged: (RecorderState) -> Unit = {}
     open val fgServiceType: Int? = null
 
-    /**
-     * Whether this service may switch a connected Bluetooth headset into
-     * SCO (hands-free/call) mode so that the headset's own microphone can
-     * be recorded.
-     *
-     * SCO takes the headset away from the normal A2DP media profile: while
-     * it is active the headset's music/video playback is cut or reduced to
-     * call quality. Screen recording therefore must NOT enable it - the
-     * user wants to keep listening to the content being recorded, and the
-     * microphone track is taken from the phone's own mic instead.
-     */
-    protected open val allowBluetoothSco: Boolean = true
-    private var bluetoothScoStarted = false
     var recorderState: RecorderState = RecorderState.IDLE
-    private lateinit var audioManager: AudioManager
 
     private val recorderReceiver = object : BroadcastReceiver() {
-        @SuppressLint("NewApi")
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.getStringExtra(ACTION_EXTRA_KEY)) {
                 STOP_ACTION -> onDestroy()
-                PAUSE_RESUME_ACTION -> {
-                    if (recorderState == RecorderState.ACTIVE) pause() else resume()
-                }
-            }
-        }
-    }
-
-    private val bluetoothReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)) {
-                AudioManager.SCO_AUDIO_STATE_CONNECTED -> {
-                    unregisterReceiver(this)
-                }
             }
         }
     }
@@ -103,27 +72,6 @@ abstract class RecorderService : LifecycleService() {
         } else {
             startForeground(NotificationHelper.RECORDING_NOTIFICATION_ID, notification.build())
         }
-        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-
-        // Only take over the Bluetooth headset when a recorder really wants
-        // its microphone AND a headset with a SCO input is connected.
-        // Starting SCO unconditionally (as before) silenced the headset's
-        // media playback for every recording, including screen recordings.
-        if (allowBluetoothSco && hasBluetoothScoInput()) {
-            runCatching {
-                unregisterReceiver(bluetoothReceiver)
-            }
-            ContextCompat.registerReceiver(
-                this,
-                bluetoothReceiver,
-                IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED),
-                RECEIVER_EXPORTED
-            )
-            runCatching {
-                audioManager.startBluetoothSco()
-                bluetoothScoStarted = true
-            }
-        }
 
         runCatching {
             unregisterReceiver(recorderReceiver)
@@ -133,37 +81,12 @@ abstract class RecorderService : LifecycleService() {
         super.onCreate()
     }
 
-    private fun hasBluetoothScoInput(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).any {
-                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            audioManager.isBluetoothScoAvailableOffCall
-        }
-    }
-
     private fun buildNotification(): NotificationCompat.Builder {
         val stopIntent = Intent(RECORDER_INTENT_ACTION).putExtra(ACTION_EXTRA_KEY, STOP_ACTION)
         val stopAction = NotificationCompat.Action.Builder(
             null,
             getString(R.string.stop),
             getPendingIntent(stopIntent, 2)
-        )
-
-        val resumeOrPauseIntent = Intent(RECORDER_INTENT_ACTION).putExtra(
-            ACTION_EXTRA_KEY,
-            PAUSE_RESUME_ACTION
-        )
-        val resumeOrPauseAction = NotificationCompat.Action.Builder(
-            null,
-            if (recorderState == RecorderState.ACTIVE) {
-                getString(R.string.pause)
-            } else {
-                getString(R.string.resume)
-            },
-            getPendingIntent(resumeOrPauseIntent, 3)
         )
 
         return NotificationCompat.Builder(
@@ -176,13 +99,6 @@ abstract class RecorderService : LifecycleService() {
             .setSilent(true)
             .setOngoing(recorderState == RecorderState.ACTIVE)
             .addAction(stopAction.build())
-            .apply {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    addAction(
-                        resumeOrPauseAction.build()
-                    )
-                }
-            }
             .setUsesChronometer(true)
             .setContentIntent(getActivityIntent())
     }
@@ -214,27 +130,8 @@ abstract class RecorderService : LifecycleService() {
         updateNotification()
     }
 
-    @RequiresApi(Build.VERSION_CODES.N)
-    open fun pause() {
-        recorder?.pause()
-        runCatching {
-            recorderState = RecorderState.PAUSED
-            onRecorderStateChanged(recorderState)
-            RecorderStatusHolder.updateState(recorderState)
-        }
-        updateNotification()
-    }
-
-    @RequiresApi(Build.VERSION_CODES.N)
-    open fun resume() {
-        recorder?.resume()
-        runCatching {
-            recorderState = RecorderState.ACTIVE
-            onRecorderStateChanged(recorderState)
-            RecorderStatusHolder.updateState(recorderState)
-        }
-        updateNotification()
-    }
+    /** 录制停止、文件描述符关闭后调用，用于内部音频合流等收尾工作 */
+    protected open suspend fun onRecordingStopped() {}
 
     override fun onDestroy() {
         runCatching {
@@ -254,6 +151,7 @@ abstract class RecorderService : LifecycleService() {
                 }
                 recorder = null
                 fileDescriptor?.close()
+                runCatching { onRecordingStopped() }
             }
 
             createRecordingFinishedNotification()
@@ -261,14 +159,6 @@ abstract class RecorderService : LifecycleService() {
 
             runCatching {
                 unregisterReceiver(recorderReceiver)
-            }
-
-            if (bluetoothScoStarted) {
-                runCatching { audioManager.stopBluetoothSco() }
-                bluetoothScoStarted = false
-            }
-            runCatching {
-                unregisterReceiver(bluetoothReceiver)
             }
 
             ServiceCompat.stopForeground(this@RecorderService, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -336,8 +226,8 @@ abstract class RecorderService : LifecycleService() {
         const val RECORDER_INTENT_ACTION = "com.bnyro.recorder.RECORDER_ACTION"
         const val FILE_NAME_EXTRA_KEY = "fileName"
         const val ACTION_EXTRA_KEY = "action"
+        const val START_DELAY_EXTRA_KEY = "startDelayMs"
         const val STOP_ACTION = "STOP"
-        const val PAUSE_RESUME_ACTION = "PR"
         const val DELETE_ACTION = "DELETE"
         const val SHARE_ACTION = "SHARE"
     }

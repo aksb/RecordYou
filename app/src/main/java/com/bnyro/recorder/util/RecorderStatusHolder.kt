@@ -6,7 +6,7 @@ import com.bnyro.recorder.enums.RecorderState
  * Process-wide, lightweight source of truth for the current [RecorderState].
  *
  * [com.bnyro.recorder.services.RecorderService] pushes state changes here whenever
- * recording starts/pauses/resumes/stops. Since the floating ball
+ * recording starts/stops. Since the floating ball
  * ([com.bnyro.recorder.services.OverlayBallService]) lives in the very same app
  * process, it can simply subscribe to this holder instead of binding to the
  * recorder service or relying on broadcasts just to know "is something being
@@ -30,6 +30,7 @@ object RecorderStatusHolder {
 
     fun updateState(newState: RecorderState) {
         state = newState
-        listeners.forEach { it(newState) }
+        // copy: a listener may remove itself (or others) while being notified
+        listeners.toList().forEach { it(newState) }
     }
 }

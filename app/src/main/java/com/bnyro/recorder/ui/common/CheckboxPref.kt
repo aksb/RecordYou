@@ -30,6 +30,7 @@ fun CheckboxPref(
     title: String,
     summary: String? = null,
     defaultValue: Boolean = false,
+    enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit = {}
 ) {
     var checked by remember {
@@ -44,12 +45,14 @@ fun CheckboxPref(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(
+                enabled = enabled,
                 interactionSource = interactionSource,
                 indication = null
             ) {
                 view.playSoundEffect(SoundEffectConstants.CLICK)
                 checked = !checked
                 Preferences.edit { putBoolean(prefKey, checked) }
+                onCheckedChange.invoke(checked)
             },
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -71,6 +74,7 @@ fun CheckboxPref(
         Spacer(modifier = Modifier.width(5.dp))
         Checkbox(
             checked = checked,
+            enabled = enabled,
             onCheckedChange = {
                 checked = it
                 Preferences.edit { putBoolean(prefKey, it) }

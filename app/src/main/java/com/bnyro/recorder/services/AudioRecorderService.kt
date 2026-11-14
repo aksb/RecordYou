@@ -1,40 +1,87 @@
 package com.bnyro.recorder.services
 
+import android.app.Activity
+import android.content.Context
 import android.content.pm.ServiceInfo
 import android.media.MediaRecorder
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.util.Log
 import android.widget.Toast
+import androidx.activity.result.ActivityResult
+import androidx.annotation.RequiresApi
 import com.bnyro.recorder.App
 import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.AudioChannels
-import com.bnyro.recorder.enums.AudioDeviceSource
-import com.bnyro.recorder.obj.AudioFormat
+import com.bnyro.recorder.enums.AudioSource
 import com.bnyro.recorder.util.PlayerHelper
 import com.bnyro.recorder.util.Preferences
+import com.bnyro.recorder.util.SystemAudioRecorder
 
 class AudioRecorderService : RecorderService() {
     override val notificationTitle: String
         get() = getString(R.string.recording_audio)
 
+    private var mediaProjection: MediaProjection? = null
+    private var systemAudioRecorder: SystemAudioRecorder? = null
+    private var isDestroying = false
+
     override val fgServiceType: Int?
-        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            when (currentAudioSource()) {
+                AudioSource.INTERNAL -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                AudioSource.MICROPHONE_AND_INTERNAL ->
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+
+                AudioSource.MICROPHONE -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            }
         } else {
             null
         }
 
+    private fun currentAudioSource() = AudioSource.fromInt(
+        Preferences.prefs.getInt(Preferences.audioSourceKey, AudioSource.MICROPHONE.value)
+    )
+
+    fun prepare(data: ActivityResult) {
+        val projectionManager = getSystemService(
+            Context.MEDIA_PROJECTION_SERVICE
+        ) as MediaProjectionManager
+        mediaProjection = runCatching {
+            projectionManager.getMediaProjection(Activity.RESULT_OK, data.data!!)
+        }.onFailure {
+            Log.e(TAG, "无法获取 MediaProjection", it)
+        }.getOrNull()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+                override fun onStop() {
+                    onDestroy()
+                }
+            }, null)
+        }
+    }
+
     override fun start() {
-        val audioFormat = AudioFormat.getCurrent()
+        val audioSource = currentAudioSource()
+        if (audioSource != AudioSource.MICROPHONE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (!startSystemAudioRecording(audioSource == AudioSource.MICROPHONE_AND_INTERNAL)) {
+                return
+            }
+        } else {
+            startMicrophoneRecording()
+        }
 
+        super.start()
+    }
+
+    private fun startMicrophoneRecording() {
         recorder = PlayerHelper.newRecorder(this).apply {
-            val audioSource = Preferences.prefs.getInt(
-                Preferences.audioDeviceSourceKey,
-                AudioDeviceSource.DEFAULT.value
-            )
-            setAudioSource(audioSource)
-
-            setOutputFormat(audioFormat.format)
-            setAudioEncoder(audioFormat.codec)
+            setAudioSource(MediaRecorder.AudioSource.DEFAULT)
+            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
 
             // Sample rate / bitrate / channel count must be set after
             // setOutputFormat() + setAudioEncoder(), not before -
@@ -42,7 +89,7 @@ class AudioRecorderService : RecorderService() {
             // calls at this point (see the same fix in ScreenRecorderService).
             val sampleRatePref = Preferences.prefs.getInt(Preferences.audioSampleRateKey, -1).takeIf { it > 0 }
             val audioBitrate = Preferences.prefs.getInt(Preferences.audioBitrateKey, -1).takeIf { it > 0 }
-            if (sampleRatePref != null && (audioFormat.codec != MediaRecorder.AudioEncoder.OPUS || sampleRatePref in opusSampleRates)) {
+            if (sampleRatePref != null) {
                 setAudioSamplingRate(sampleRatePref)
             }
             if (audioBitrate != null) {
@@ -55,9 +102,7 @@ class AudioRecorderService : RecorderService() {
                 setAudioChannels(it)
             }
 
-            outputFile = (application as App).fileRepository.getOutputFile(
-                audioFormat.extension
-            )
+            outputFile = (application as App).fileRepository.getOutputFile("m4a")
             if (outputFile == null) {
                 Toast.makeText(
                     this@AudioRecorderService,
@@ -77,13 +122,70 @@ class AudioRecorderService : RecorderService() {
 
             start()
         }
-
-        super.start()
     }
 
-    override fun getCurrentAmplitude() = recorder?.maxAmplitude
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun startSystemAudioRecording(includeMicrophone: Boolean): Boolean {
+        val projection = mediaProjection
+        if (projection == null) {
+            Toast.makeText(this, R.string.internal_audio_failed, Toast.LENGTH_LONG).show()
+            onDestroy()
+            return false
+        }
+
+        outputFile = (application as App).fileRepository.getOutputFile("m4a")
+        if (outputFile == null) {
+            Toast.makeText(this, R.string.cant_access_selected_folder, Toast.LENGTH_LONG).show()
+            onDestroy()
+            return false
+        }
+
+        val descriptor = contentResolver.openFileDescriptor(outputFile!!.uri, "w")
+        if (descriptor == null) {
+            Toast.makeText(this, R.string.cant_access_selected_folder, Toast.LENGTH_LONG).show()
+            onDestroy()
+            return false
+        }
+
+        return runCatching {
+            SystemAudioRecorder(
+                projection,
+                descriptor,
+                includeMicrophone,
+                Preferences.prefs.getInt(Preferences.audioBitrateKey, 192_000)
+            ).also {
+                it.start()
+                systemAudioRecorder = it
+            }
+            true
+        }.onFailure {
+            runCatching { descriptor.close() }
+            Log.e(TAG, "无法采集内部音频", it)
+            Toast.makeText(this, R.string.internal_audio_failed, Toast.LENGTH_LONG).show()
+            onDestroy()
+        }.getOrDefault(false)
+    }
+
+    override fun onDestroy() {
+        if (isDestroying) return
+        isDestroying = true
+
+        systemAudioRecorder?.let {
+            it.stop()
+            it.release()
+        }
+        systemAudioRecorder = null
+
+        super.onDestroy()
+
+        mediaProjection?.stop()
+        mediaProjection = null
+    }
+
+    override fun getCurrentAmplitude(): Int? =
+        systemAudioRecorder?.currentAmplitude ?: recorder?.maxAmplitude
 
     companion object {
-        private val opusSampleRates =  listOf(8000, 12000, 16000, 24000, 48000)
+        private const val TAG = "AudioRecorderService"
     }
 }

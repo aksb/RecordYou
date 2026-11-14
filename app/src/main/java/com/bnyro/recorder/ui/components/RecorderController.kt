@@ -3,7 +3,6 @@ package com.bnyro.recorder.ui.components
 import android.app.Activity
 import android.content.Context
 import android.media.projection.MediaProjectionManager
-import android.os.Build
 import android.text.format.DateUtils
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -17,12 +16,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
@@ -43,7 +39,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.RecorderState
-import com.bnyro.recorder.ui.common.ClickableIcon
 import com.bnyro.recorder.ui.models.RecorderModel
 
 @Composable
@@ -62,12 +57,27 @@ fun RecorderController(
         recorderModel.startVideoRecorder(context, result)
     }
 
+    val requestAudioRecording = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        recorderModel.startAudioRecorder(context, result)
+    }
+
     fun requestScreenRecording() {
         if (!recorderModel.hasScreenRecordingPermissions(context)) return
         requestRecording.launch(
             mProjectionManager.createScreenCaptureIntent()
         )
     }
+
+    fun requestAudioWithInternalAudio() {
+        if (!recorderModel.hasScreenRecordingPermissions(context)) return
+        requestAudioRecording.launch(
+            mProjectionManager.createScreenCaptureIntent()
+        )
+    }
+
     Column(
         modifier = Modifier.wrapContentSize(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -108,6 +118,7 @@ fun RecorderController(
                         when {
                             recorderModel.recorderState != RecorderState.IDLE -> recorderModel.stopRecording()
                             recordScreenMode -> requestScreenRecording()
+                            recorderModel.audioRequiresScreenCapture() -> requestAudioWithInternalAudio()
                             else -> recorderModel.startAudioRecorder(context)
                         }
                     },
@@ -120,7 +131,7 @@ fun RecorderController(
                             Icon(
                                 Icons.Default.Stop,
                                 modifier = Modifier.size(36.dp),
-                                contentDescription = stringResource(R.string.pause)
+                                contentDescription = stringResource(R.string.stop)
                             )
                         }
 
@@ -137,37 +148,6 @@ fun RecorderController(
                                     .clip(CircleShape)
                                     .background(Color(0x9FFFFFFF))
                             )
-                        }
-                    }
-                }
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && recorderModel.recorderState != RecorderState.IDLE) {
-                Spacer(modifier = Modifier.width(20.dp))
-                ElevatedCard(
-                    colors = CardDefaults.elevatedCardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                ) {
-                    ClickableIcon(
-                        imageVector = if (recorderModel.recorderState == RecorderState.PAUSED) {
-                            Icons.Default.PlayArrow
-                        } else {
-                            Icons.Default.Pause
-                        },
-                        contentDescription = stringResource(
-                            if (recorderModel.recorderState == RecorderState.PAUSED) {
-                                R.string.resume
-                            } else {
-                                R.string.pause
-                            }
-                        )
-                    ) {
-                        if (recorderModel.recorderState == RecorderState.PAUSED) {
-                            recorderModel.resumeRecording()
-                        } else {
-                            recorderModel.pauseRecording()
                         }
                     }
                 }

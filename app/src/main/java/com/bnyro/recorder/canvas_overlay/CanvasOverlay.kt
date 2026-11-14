@@ -20,12 +20,30 @@ import androidx.core.view.isVisible
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.bnyro.recorder.enums.RecorderState
 import com.bnyro.recorder.ui.theme.RecordYouTheme
+import com.bnyro.recorder.util.Preferences
+import com.bnyro.recorder.util.RecorderStatusHolder
 
 @SuppressLint("ClickableViewAccessibility")
 @RequiresApi(Build.VERSION_CODES.O)
 class CanvasOverlay(context: Context) {
     private val windowManager = context.getSystemService(WINDOW_SERVICE) as WindowManager
+    private val displayMetrics = context.resources.displayMetrics
+    private var removed = false
+    private var firstStateSkipped = false
+
+    // Stops the annotation overlay when the recording ends from anywhere
+    // (notification, floating ball, ...), not just from inside the app.
+    // 注册时 RecorderStatusHolder 会立刻回调一次当前状态，这次要跳过，
+    // 否则刚显示出来就会被当成"已停止"。
+    private val stateListener: (RecorderState) -> Unit = { state ->
+        if (!firstStateSkipped) {
+            firstStateSkipped = true
+        } else if (state == RecorderState.IDLE) {
+            remove()
+        }
+    }
     private val canvasView = ComposeView(context).apply {
         val activity = context as ComponentActivity
         setViewTreeLifecycleOwner(activity)
@@ -73,6 +91,14 @@ class CanvasOverlay(context: Context) {
                                 toolbarViewParams.y = newY
                                 windowManager.updateViewLayout(this@apply, toolbarViewParams)
                             }
+
+                            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                                // remember where the user left the toolbar
+                                Preferences.edit {
+                                    putInt(Preferences.annotationXKey, toolbarViewParams.x)
+                                    putInt(Preferences.annotationYKey, toolbarViewParams.y)
+                                }
+                            }
                         }
                     },
                     hideCanvas = { hide ->
@@ -90,11 +116,18 @@ class CanvasOverlay(context: Context) {
     private val toolbarViewParams =
         getWindowLayoutParams(WindowManager.LayoutParams.WRAP_CONTENT).apply {
             gravity = Gravity.TOP or Gravity.END
-            x = 0
-            y = 0
+            x = Preferences.prefs.getInt(Preferences.annotationXKey, 0)
+            y = Preferences.prefs.getInt(Preferences.annotationYKey, 0)
         }
 
     fun show() {
+        firstStateSkipped = false
+        // keep the saved position inside the current screen bounds
+        toolbarViewParams.x = toolbarViewParams.x
+            .coerceIn(0, displayMetrics.widthPixels)
+        toolbarViewParams.y = toolbarViewParams.y
+            .coerceIn(0, (displayMetrics.heightPixels - dpToPx(56)).coerceAtLeast(0))
+        RecorderStatusHolder.addListener(stateListener)
         hideCanvas()
         try {
             if (canvasView.windowToken == null && canvasView.parent == null) {
@@ -108,6 +141,8 @@ class CanvasOverlay(context: Context) {
             Log.e("Show Overlay", e.toString())
         }
     }
+
+    private fun dpToPx(dp: Int): Int = (dp * displayMetrics.density).toInt()
 
     private fun getWindowLayoutParams(size: Int): WindowManager.LayoutParams {
         return WindowManager.LayoutParams(
@@ -128,6 +163,9 @@ class CanvasOverlay(context: Context) {
     }
 
     fun remove() {
+        if (removed) return
+        removed = true
+        RecorderStatusHolder.removeListener(stateListener)
         try {
             windowManager.removeView(canvasView)
             canvasView.invalidate()

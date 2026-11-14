@@ -1,6 +1,5 @@
 package com.bnyro.recorder.services
 
-import android.app.AlertDialog
 import android.app.Service
 import android.content.Intent
 import android.content.res.Configuration
@@ -11,7 +10,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
@@ -29,12 +27,11 @@ import kotlin.math.abs
 
 /**
  * A small draggable floating ball, shown on top of every other app, that lets
- * the user start audio/screen recording and pause/resume/stop an ongoing one
- * without switching back into RecordYou.
+ * the user start audio/screen recording and stop an ongoing one without
+ * switching back into RecordYou.
  *
  * - Tap while idle -> opens a small 2-button menu (record audio / record screen).
- * - Tap while recording -> pause/resume.
- * - Long-press while recording -> stop.
+ * - Tap while recording -> stops the recording immediately.
  * - Drag -> moves the ball, snaps to the nearest screen edge on release.
  *
  * Requires the "display over other apps" permission (SYSTEM_ALERT_WINDOW),
@@ -60,7 +57,6 @@ class OverlayBallService : Service() {
     private var downParamX = 0
     private var downParamY = 0
     private var dragging = false
-    private var longPressHandled = false
 
     private val stateListener: (RecorderState) -> Unit = { state ->
         mainHandler.post { updateBallAppearance(state) }
@@ -183,11 +179,6 @@ class OverlayBallService : Service() {
                 downParamX = params.x
                 downParamY = params.y
                 dragging = false
-                longPressHandled = false
-                // Fire as soon as the hold threshold is reached, instead of
-                // waiting for the finger to lift - waiting until release felt
-                // broken ("I'm holding it down and nothing is happening").
-                mainHandler.postDelayed(longPressRunnable, LONG_PRESS_MS)
                 return true
             }
 
@@ -196,7 +187,6 @@ class OverlayBallService : Service() {
                 val dy = event.rawY - downRawY
                 if (!dragging && (abs(dx) > TOUCH_SLOP_PX || abs(dy) > TOUCH_SLOP_PX)) {
                     dragging = true
-                    mainHandler.removeCallbacks(longPressRunnable)
                     hideMenu()
                 }
                 if (dragging) {
@@ -208,14 +198,9 @@ class OverlayBallService : Service() {
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                mainHandler.removeCallbacks(longPressRunnable)
                 if (dragging) {
                     snapToEdge(ball, params)
-                } else if (!longPressHandled) {
-                    // The long-press-to-stop case already fired (and asked
-                    // for confirmation) from longPressRunnable while the
-                    // finger was still down - only a plain short tap is left
-                    // to handle here.
+                } else {
                     onBallTapped()
                 }
                 dragging = false
@@ -223,17 +208,6 @@ class OverlayBallService : Service() {
             }
         }
         return false
-    }
-
-    private val longPressRunnable = Runnable {
-        if (dragging) return@Runnable
-        if (RecorderStatusHolder.state == RecorderState.ACTIVE ||
-            RecorderStatusHolder.state == RecorderState.PAUSED
-        ) {
-            longPressHandled = true
-            ballView?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-            showStopConfirmationDialog()
-        }
     }
 
     private fun snapToEdge(ball: ImageView, params: WindowManager.LayoutParams) {
@@ -275,30 +249,8 @@ class OverlayBallService : Service() {
         ballView?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
         when (RecorderStatusHolder.state) {
             RecorderState.IDLE -> toggleMenu()
-            RecorderState.ACTIVE, RecorderState.PAUSED -> {
-                sendRecorderAction(RecorderService.PAUSE_RESUME_ACTION)
-            }
+            RecorderState.ACTIVE -> sendRecorderAction(RecorderService.STOP_ACTION)
         }
-    }
-
-    /**
-     * Shown as soon as the long-press threshold is reached while recording -
-     * asks for confirmation before actually stopping, since a bare long
-     * press with no feedback used to be too easy to trigger by accident (and
-     * too easy to miss on purpose, since nothing ever indicated it existed).
-     */
-    private fun showStopConfirmationDialog() {
-        val dialog = AlertDialog.Builder(
-            ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-        )
-            .setMessage(getString(R.string.stop_recording_confirmation))
-            .setPositiveButton(getString(R.string.stop)) { _, _ ->
-                sendRecorderAction(RecorderService.STOP_ACTION)
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .create()
-        dialog.window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
-        runCatching { dialog.show() }
     }
 
     private fun sendRecorderAction(action: String) {
@@ -445,9 +397,7 @@ class OverlayBallService : Service() {
             RecorderState.IDLE ->
                 android.R.color.darker_gray to android.R.drawable.ic_input_add
             RecorderState.ACTIVE ->
-                android.R.color.holo_red_dark to android.R.drawable.ic_media_pause
-            RecorderState.PAUSED ->
-                android.R.color.holo_orange_dark to android.R.drawable.ic_media_play
+                android.R.color.holo_red_dark to R.drawable.ic_stop_square
         }
         ball.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
@@ -463,7 +413,6 @@ class OverlayBallService : Service() {
         private const val BUTTON_SIZE_DP = 56
         private const val GAP_DP = 8
         private const val TOUCH_SLOP_PX = 16
-        private const val LONG_PRESS_MS = 550L
         private const val MENU_AUTO_HIDE_MS = 4000L
 
         // 录音按钮：绿色；录像按钮：蓝色 - 图标本身保持白色不变

@@ -81,9 +81,6 @@
     <string name="close_floating_ball">Close floating ball</string>
     <string name="tile_toggle_floating_ball">Floating ball</string>
     <string name="shortcut_enable_floating_ball">Enable floating ball</string>
-    <string name="stop_recording_confirmation">Stop recording?</string>
-    <string name="floating_ball_hint_message">While recording audio/screen, long-press the floating ball to stop it.</string>
-    <string name="dont_show_again">Don\'t show again</string>
     <string name="custom">Custom</string>
     <string name="save">Save</string>
     <string name="mod_author">Mod author</string>
@@ -105,5 +102,10 @@
     <string name="draw_mode">Draw Mode</string>
     <string name="erase_mode">Erase Mode</string>
     <string name="internal_audio">Internal Audio (Root)</string>
+    <string name="internal_audio_playback">Internal audio</string>
+    <string name="internal_audio_failed">Unable to capture internal audio</string>
+    <string name="microphone_and_internal_audio">Microphone + internal audio</string>
+    <string name="audio_source">Audio source</string>
+    <string name="lossless_audio_microphone_only">Only available with the microphone audio source.</string>
     <string name="no_sufficient_permissions">No sufficient permissions to start recording</string>
 </resources>

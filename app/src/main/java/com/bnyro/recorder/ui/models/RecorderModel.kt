@@ -21,7 +21,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import com.bnyro.recorder.R
 import com.bnyro.recorder.canvas_overlay.CanvasOverlay
-import com.bnyro.recorder.enums.AudioDeviceSource
 import com.bnyro.recorder.enums.AudioSource
 import com.bnyro.recorder.enums.RecorderState
 import com.bnyro.recorder.services.AudioRecorderService
@@ -51,7 +50,10 @@ class RecorderModel : ViewModel() {
             recorderService?.onRecorderStateChanged = {
                 recorderState = it
             }
-            (recorderService as? ScreenRecorderService)?.prepare(activityResult!!)
+            activityResult?.let { result ->
+                (recorderService as? ScreenRecorderService)?.prepare(result)
+                (recorderService as? AudioRecorderService)?.prepare(result)
+            }
             // Only screen recording ever creates a canvasOverlay (see
             // startVideoRecorder below) - guarding on the service type here
             // as well (not just relying on canvasOverlay being null for audio
@@ -68,9 +70,16 @@ class RecorderModel : ViewModel() {
         }
     }
 
-    fun startVideoRecorder(context: Context, result: ActivityResult) {
+    /**
+     * @param startDelayMs 延迟多少毫秒后才真正开始采集。从悬浮球/桌面快捷方式
+     * 启动时，授权弹窗关闭后会先有回到上个应用的过渡动画，稍等一下再开始录，
+     * 可以避免把这段动画录进视频的前几帧。
+     */
+    fun startVideoRecorder(context: Context, result: ActivityResult, startDelayMs: Long = 0L) {
         activityResult = result
-        val serviceIntent = Intent(context, ScreenRecorderService::class.java)
+        val serviceIntent = Intent(context, ScreenRecorderService::class.java).apply {
+            putExtra(RecorderService.START_DELAY_EXTRA_KEY, startDelayMs)
+        }
         startRecorderService(context, serviceIntent)
         val showOverlayAnnotation =
             Preferences.prefs.getBoolean(Preferences.showOverlayAnnotationToolKey, false)
@@ -80,17 +89,12 @@ class RecorderModel : ViewModel() {
     }
 
     @SuppressLint("NewApi")
-    fun startAudioRecorder(context: Context): Boolean {
+    fun startAudioRecorder(context: Context, result: ActivityResult? = null): Boolean {
+        activityResult = result
+
         val audioPermission = mutableListOf(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             audioPermission.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        val internalAudio = Preferences.prefs.getInt(
-            Preferences.audioDeviceSourceKey,
-            0
-        ) == AudioDeviceSource.REMOTE_SUBMIX.value
-        if (internalAudio) {
-            audioPermission.add(Manifest.permission.CAPTURE_AUDIO_OUTPUT)
         }
 
         if (!PermissionHelper.checkPermissions(context, audioPermission.toTypedArray())) {
@@ -102,8 +106,15 @@ class RecorderModel : ViewModel() {
             return false
         }
 
+        val audioSource = AudioSource.fromInt(
+            Preferences.prefs.getInt(Preferences.audioSourceKey, AudioSource.MICROPHONE.value)
+        )
+        // 无损 WAV 仅话筒模式可用
+        val lossless = Preferences.prefs.getBoolean(Preferences.losslessRecorderKey, false) &&
+            audioSource == AudioSource.MICROPHONE
+
         val serviceIntent =
-            if (Preferences.prefs.getBoolean(Preferences.losslessRecorderKey, false)) {
+            if (lossless) {
                 Intent(context, LosslessRecorderService::class.java)
             } else {
                 Intent(context, AudioRecorderService::class.java)
@@ -112,6 +123,11 @@ class RecorderModel : ViewModel() {
         startRecorderService(context, serviceIntent)
         return true
     }
+
+    /** 内部/混合音频需要 MediaProjection 授权 */
+    fun audioRequiresScreenCapture() = AudioSource.fromInt(
+        Preferences.prefs.getInt(Preferences.audioSourceKey, AudioSource.MICROPHONE.value)
+    ) != AudioSource.MICROPHONE
 
     private fun startRecorderService(context: Context, intent: Intent) {
         runCatching {
@@ -149,20 +165,6 @@ class RecorderModel : ViewModel() {
         recordedAmplitudes.clear()
     }
 
-    @RequiresApi(Build.VERSION_CODES.N)
-    fun pauseRecording() {
-        recorderService?.pause()
-    }
-
-    @RequiresApi(Build.VERSION_CODES.N)
-    fun resumeRecording() {
-        recorderService?.resume()
-        handler.postDelayed(this::updateTime, 1000)
-        if (recorderService is AudioRecorderService) {
-            handler.postDelayed(this::updateAmplitude, 100)
-        }
-    }
-
     private fun updateTime() {
         if (recorderState != RecorderState.ACTIVE) return
 
@@ -188,24 +190,12 @@ class RecorderModel : ViewModel() {
 
     @SuppressLint("NewApi")
     fun hasScreenRecordingPermissions(context: Context): Boolean {
-        val requiredPermissions = arrayListOf<String>()
-
-        val recordAudio =
-            Preferences.prefs.getInt(Preferences.audioSourceKey, 0) == AudioSource.MICROPHONE.value
-
-        if (recordAudio) requiredPermissions.add(Manifest.permission.RECORD_AUDIO)
-
-        val internalAudio = Preferences.prefs.getInt(
-            Preferences.audioDeviceSourceKey,
-            0
-        ) == AudioDeviceSource.REMOTE_SUBMIX.value
-        if (internalAudio) requiredPermissions.add(Manifest.permission.CAPTURE_AUDIO_OUTPUT)
+        // 三种音频来源都需要录音权限（播放捕获同样要求 RECORD_AUDIO）
+        val requiredPermissions = arrayListOf(Manifest.permission.RECORD_AUDIO)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requiredPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
-
-        if (requiredPermissions.isEmpty()) return true
 
         val granted = PermissionHelper.checkPermissions(context, requiredPermissions.toTypedArray())
         if (!granted) {

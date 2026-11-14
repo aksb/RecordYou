@@ -1,0 +1,23 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.bnyro.recorder"
+4    android:versionCode="1"
+5    android:versionName="1.0" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="21"
+9        android:targetSdkVersion="34" />
+10    <!--
+11        Intentionally empty: no activities, no services, no permissions.
+12        This APK exists purely to occupy the com.bnyro.recorder package name
+13        in /system/priv-app so the real app inherits privileged status when
+14        installed/updated over it. See build.gradle.kts for the full story.
+15    -->
+16    <application
+16-->D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml:9:5-44
+17        android:debuggable="true"
+18        android:extractNativeLibs="true"
+19        android:hasCode="false" />
+19-->D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml:9:18-41
+20
+21</manifest>
