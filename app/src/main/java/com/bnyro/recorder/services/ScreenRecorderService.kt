@@ -234,11 +234,15 @@ class ScreenRecorderService : RecorderService() {
         )
         runCatching {
             SystemAudioRecorder(
-                mediaProjection!!,
-                audioDescriptor,
-                includeMicrophone,
-                Preferences.prefs.getInt(Preferences.videoAudioBitrateKey, 192_000)
-                    .takeIf { it > 0 } ?: 192_000
+                mediaProjection = mediaProjection!!,
+                fileDescriptor = audioDescriptor,
+                includeMicrophone = includeMicrophone,
+                bitRate = Preferences.prefs.getInt(Preferences.videoAudioBitrateKey, 192_000)
+                    .takeIf { it > 0 } ?: 192_000,
+                micPercent = Preferences.prefs.getInt(
+                    Preferences.videoAudioMixRatioKey,
+                    SystemAudioRecorder.DEFAULT_MIC_PERCENT
+                )
             ).also {
                 it.start()
                 audioStartNanos = it.startNanos

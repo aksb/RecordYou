@@ -106,6 +106,9 @@
     <string name="internal_audio_failed">Unable to capture internal audio</string>
     <string name="microphone_and_internal_audio">Microphone + internal audio</string>
     <string name="audio_source">Audio source</string>
+    <string name="audio_mix_ratio">Volume mix</string>
+    <string name="audio_mix_ratio_value">Mic %1$d%% · Internal audio %2$d%%</string>
+    <string name="audio_mix_ratio_unavailable">Only available with the microphone + internal audio source.</string>
     <string name="lossless_audio_microphone_only">Only available with the microphone audio source.</string>
     <string name="no_sufficient_permissions">No sufficient permissions to start recording</string>
     <string name="section_general">General</string>

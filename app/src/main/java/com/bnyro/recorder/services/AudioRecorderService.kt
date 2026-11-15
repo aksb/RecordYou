@@ -148,11 +148,15 @@ class AudioRecorderService : RecorderService() {
 
         return runCatching {
             SystemAudioRecorder(
-                projection,
-                descriptor,
-                includeMicrophone,
-                Preferences.prefs.getInt(Preferences.audioBitrateKey, 192_000)
-                    .takeIf { it > 0 } ?: 192_000
+                mediaProjection = projection,
+                fileDescriptor = descriptor,
+                includeMicrophone = includeMicrophone,
+                bitRate = Preferences.prefs.getInt(Preferences.audioBitrateKey, 192_000)
+                    .takeIf { it > 0 } ?: 192_000,
+                micPercent = Preferences.prefs.getInt(
+                    Preferences.audioMixRatioKey,
+                    SystemAudioRecorder.DEFAULT_MIC_PERCENT
+                )
             ).also {
                 it.start()
                 systemAudioRecorder = it

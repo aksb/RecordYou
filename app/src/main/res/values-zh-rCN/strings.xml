@@ -99,6 +99,9 @@
     <string name="internal_audio_failed">无法捕获内部音频</string>
     <string name="microphone_and_internal_audio">话筒 + 内部音频</string>
     <string name="audio_source">音频来源</string>
+    <string name="audio_mix_ratio">音量配比</string>
+    <string name="audio_mix_ratio_value">话筒 %1$d%% · 内部音频 %2$d%%</string>
+    <string name="audio_mix_ratio_unavailable">仅在「话筒 + 内部音频」音频来源时可用。</string>
     <string name="lossless_audio_microphone_only">仅话筒音频来源可用。</string>
     <string name="no_sufficient_permissions">没有足够的权限开始录制</string>
     <string name="section_general">通用</string>

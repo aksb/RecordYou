@@ -5,10 +5,12 @@ import android.os.Build
 import android.view.SoundEffectConstants
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -24,6 +26,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -56,6 +59,7 @@ import com.bnyro.recorder.ui.dialogs.AboutDialog
 import com.bnyro.recorder.ui.models.ThemeModel
 import com.bnyro.recorder.util.PickFolderContract
 import com.bnyro.recorder.util.Preferences
+import kotlin.math.roundToInt
 
 private const val BITRATE_PRESET_LOW = 1_500_000
 private const val BITRATE_PRESET_MEDIUM = 4_000_000
@@ -92,6 +96,11 @@ fun SettingsScreen() {
             )
         )
     }
+    var audioMixRatio by remember {
+        mutableStateOf(
+            Preferences.prefs.getInt(Preferences.audioMixRatioKey, 50)
+        )
+    }
     // 录屏使用独立的音频参数，与录音互不影响
     var videoAudioChannels by remember {
         mutableStateOf(
@@ -111,6 +120,11 @@ fun SettingsScreen() {
                     AudioSource.MICROPHONE.value
                 )
             )
+        )
+    }
+    var videoAudioMixRatio by remember {
+        mutableStateOf(
+            Preferences.prefs.getInt(Preferences.videoAudioMixRatioKey, 50)
         )
     }
     var videoEncoder by remember {
@@ -203,6 +217,15 @@ fun SettingsScreen() {
                 }
             }
             Spacer(modifier = Modifier.height(10.dp))
+            MixRatioPref(
+                micPercent = audioMixRatio,
+                enabled = audioSource == AudioSource.MICROPHONE_AND_INTERNAL,
+                onValueChange = { audioMixRatio = it },
+                onValueChangeFinished = {
+                    Preferences.edit { putInt(Preferences.audioMixRatioKey, audioMixRatio) }
+                }
+            )
+            Spacer(modifier = Modifier.height(10.dp))
             Row {
                 CustomNumInputPref(
                     key = Preferences.audioSampleRateKey,
@@ -279,6 +302,17 @@ fun SettingsScreen() {
                     }
                 }
             }
+            Spacer(modifier = Modifier.height(10.dp))
+            MixRatioPref(
+                micPercent = videoAudioMixRatio,
+                enabled = videoAudioSource == AudioSource.MICROPHONE_AND_INTERNAL,
+                onValueChange = { videoAudioMixRatio = it },
+                onValueChangeFinished = {
+                    Preferences.edit {
+                        putInt(Preferences.videoAudioMixRatioKey, videoAudioMixRatio)
+                    }
+                }
+            )
             Spacer(modifier = Modifier.height(10.dp))
             // 内部音频固定为 48 kHz 立体声，采样率与声道仅对话筒来源生效
             val microphoneSource = videoAudioSource == AudioSource.MICROPHONE
@@ -534,4 +568,61 @@ private fun SubSectionTitle(text: String) {
         fontSize = 14.sp,
         color = MaterialTheme.colorScheme.primary
     )
+}
+
+/**
+ * 话筒 / 内部音频的混音配比，两者互补，合计恒为 100%。
+ * 仅在“话筒 + 内部音频”来源下可用。
+ */
+@Composable
+private fun MixRatioPref(
+    micPercent: Int,
+    enabled: Boolean,
+    onValueChange: (Int) -> Unit,
+    onValueChangeFinished: () -> Unit
+) {
+    Text(
+        text = stringResource(R.string.audio_mix_ratio),
+        fontWeight = FontWeight.Bold,
+        fontSize = 18.sp
+    )
+    Spacer(modifier = Modifier.height(2.dp))
+    Text(
+        text = stringResource(R.string.audio_mix_ratio_value, micPercent, 100 - micPercent),
+        fontSize = 13.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Slider(
+        // 滑块从左到右依次是“话筒”到“内部音频”，所以位置值用内部音频占比
+        value = (100 - micPercent).toFloat(),
+        onValueChange = { onValueChange(100 - it.roundToInt()) },
+        onValueChangeFinished = onValueChangeFinished,
+        valueRange = 0f..100f,
+        // 以 5% 为一档，避免拖动时出现无意义的精确值
+        steps = 19,
+        enabled = enabled
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = stringResource(R.string.microphone),
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = stringResource(R.string.internal_audio_playback),
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    if (!enabled) {
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = stringResource(R.string.audio_mix_ratio_unavailable),
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }

@@ -17,7 +17,9 @@ import android.util.Log
 import androidx.annotation.RequiresApi
 import kotlin.concurrent.thread
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.sin
 import android.media.AudioFormat as AndroidAudioFormat
 
 /**
@@ -33,17 +35,28 @@ class SystemAudioRecorder(
     mediaProjection: MediaProjection,
     private val fileDescriptor: ParcelFileDescriptor,
     includeMicrophone: Boolean,
-    bitRate: Int = DEFAULT_BIT_RATE
+    bitRate: Int = DEFAULT_BIT_RATE,
+    micPercent: Int = DEFAULT_MIC_PERCENT
 ) {
     companion object {
         private const val TAG = "SystemAudioRecorder"
         const val SAMPLE_RATE = 48_000
         const val DEFAULT_BIT_RATE = 192_000
+
+        /** 话筒与内部音频各占一半 */
+        const val DEFAULT_MIC_PERCENT = 50
         private const val CHANNEL_COUNT = 2
         private const val BYTES_PER_SAMPLE = 2
         private const val TIMEOUT_US = 10_000L
         private const val CHUNK_BYTES = SAMPLE_RATE / 10 * BYTES_PER_SAMPLE * CHANNEL_COUNT
     }
+
+    /**
+     * 话筒占比换算成增益，使用等功率曲线而非线性比例：
+     * 滑块在中间时两路各约 70.7%，左右拖动时整体响度不会明显塌陷。
+     */
+    private val micGain: Float
+    private val internalGain: Float
 
     private val encoder: MediaCodec
     private val muxer: MediaMuxer
@@ -69,6 +82,10 @@ class SystemAudioRecorder(
         private set
 
     init {
+        val angle = micPercent.coerceIn(0, 100) / 100.0 * (Math.PI / 2)
+        micGain = sin(angle).toFloat()
+        internalGain = cos(angle).toFloat()
+
         val captureConfig = AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
             .addMatchingUsage(AudioAttributes.USAGE_GAME)
@@ -98,7 +115,8 @@ class SystemAudioRecorder(
 
         var mic: AudioRecord? = null
         var mono = false
-        if (includeMicrophone) {
+        // 话筒占比为 0 时完全不打开麦克风，省电且避免占用麦克风
+        if (includeMicrophone && micPercent > 0) {
             for (mask in listOf(
                 AndroidAudioFormat.CHANNEL_IN_STEREO,
                 AndroidAudioFormat.CHANNEL_IN_MONO
@@ -159,7 +177,10 @@ class SystemAudioRecorder(
         if (internalRecord.state != AudioRecord.STATE_INITIALIZED) {
             throw IllegalStateException("无法初始化内部音频采集")
         }
-        Log.i(TAG, "初始化完成，麦克风=${if (mic != null) "开" else "关"}")
+        Log.i(
+            TAG,
+            "初始化完成，麦克风=${if (mic != null) "开" else "关"} 增益=话筒${"%.2f".format(micGain)}/内部${"%.2f".format(internalGain)}"
+        )
     }
 
     fun start() {
@@ -294,7 +315,10 @@ class SystemAudioRecorder(
             } else {
                 0
             }
-            val sample = (internalSample + micSample).coerceIn(-32768, 32767)
+            // 按配比缩放到 0-1 的增益后再相加，避免直接满幅相加导致削波
+            val sample = (internalSample * internalGain + micSample * micGain)
+                .toInt()
+                .coerceIn(-32768, 32767)
             output[i] = sample.toByte()
             output[i + 1] = (sample shr 8).toByte()
             i += 2

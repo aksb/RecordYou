@@ -12,11 +12,14 @@ object Preferences {
     const val audioSampleRateKey = "audioSampleRate"
     const val audioBitrateKey = "audioBitrate"
     const val audioChannelsKey = "audioChannels"
+    // 话筒+内部音频时的麦克风占比（0-100），其余部分给内部音频
+    const val audioMixRatioKey = "audioMixRatio"
     // 录屏的音频参数与录音分开，避免互相影响
     const val videoAudioSourceKey = "videoAudioSource"
     const val videoAudioSampleRateKey = "videoAudioSampleRate"
     const val videoAudioBitrateKey = "videoAudioBitrate"
     const val videoAudioChannelsKey = "videoAudioChannels"
+    const val videoAudioMixRatioKey = "videoAudioMixRatio"
     private const val videoAudioSettingsMigratedKey = "videoAudioSettingsMigrated"
     const val videoCodecKey = "videoCodec"
     const val videoBitrateKey = "videoBitrate"
