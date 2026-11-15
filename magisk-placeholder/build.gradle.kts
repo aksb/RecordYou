@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
 }
@@ -17,6 +19,21 @@ plugins {
 // stub's versionCode never exceeds the real app's - so this module should
 // essentially never need to change once it works, regardless of how many
 // times RecordYou itself gets released.
+// 与 app 模块共用同一把正式签名：占位包要装进 /system/priv-app，
+// 真包覆盖安装时签名必须完全一致，否则特权链断裂、正式版装不上。
+val keystoreProps = Properties()
+val keystorePropsFile = rootProject.file("keystore.properties")
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.inputStream().use { keystoreProps.load(it) }
+}
+
+val releaseKeystoreFile = rootProject.file("RecordYou.jks")
+val releaseStorePassword = System.getenv("KEYSTORE_PASSWORD") ?: keystoreProps.getProperty("storePassword")
+val releaseKeyPassword = System.getenv("KEY_PASSWORD") ?: keystoreProps.getProperty("keyPassword")
+val releaseKeyAlias = System.getenv("KEY_ALIAS") ?: keystoreProps.getProperty("keyAlias")
+val canSignRelease = releaseKeystoreFile.exists() &&
+    releaseStorePassword != null && releaseKeyPassword != null && releaseKeyAlias != null
+
 android {
     namespace = "com.bnyro.recorder.placeholder"
     compileSdk = 34
@@ -29,15 +46,23 @@ android {
         versionName = "1.0"
     }
 
+    signingConfigs {
+        if (canSignRelease) {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = releaseStorePassword
+                keyPassword = releaseKeyPassword
+                keyAlias = releaseKeyAlias
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Same reasoning as app/build.gradle.kts: no dedicated keystore,
-            // reuse the auto-generated debug signing config. What matters
-            // for the Magisk-module trick is just that this stub and the
-            // real release APK are signed with the same key *within a given
-            // CI run* - see magisk-module/README.md.
-            signingConfig = signingConfigs.getByName("debug")
+            if (canSignRelease) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }

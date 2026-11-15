@@ -1,0 +1,4 @@
+#Sun Nov 15 21:40:24 CST 2026
+base.0=D\:\\GitHub_source\\RecordYou\\magisk-placeholder\\build\\intermediates\\dex\\release\\mergeDexRelease\\classes.dex
+renamed.0=classes.dex
+path.0=classes.dex

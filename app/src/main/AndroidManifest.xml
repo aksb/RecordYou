@@ -28,6 +28,15 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.RecordYou"
         tools:targetApi="31">
+        <!-- 快捷录制入口：透明无启动画面，单独一个任务，不出现在最近任务里 -->
+        <activity
+            android:name=".ui.QuickActionActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/Theme.RecordYou.Transparent" />
+
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"

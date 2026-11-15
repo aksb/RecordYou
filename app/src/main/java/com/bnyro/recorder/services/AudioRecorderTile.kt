@@ -8,12 +8,13 @@ import android.service.quicksettings.TileService
 import androidx.annotation.RequiresApi
 import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.ui.MainActivity
+import com.bnyro.recorder.ui.QuickActionActivity
 
 @RequiresApi(Build.VERSION_CODES.N)
 class AudioRecorderTile : TileService() {
     override fun onClick() {
         super.onClick()
-        val intent = Intent(this, MainActivity::class.java)
+        val intent = Intent(this, QuickActionActivity::class.java)
             .putExtra(MainActivity.EXTRA_ACTION_KEY, RecorderType.AUDIO.name)
             .apply {
                 flags = FLAG_ACTIVITY_NEW_TASK

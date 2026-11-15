@@ -21,6 +21,7 @@ import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.RecorderState
 import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.ui.MainActivity
+import com.bnyro.recorder.ui.QuickActionActivity
 import com.bnyro.recorder.util.Preferences
 import com.bnyro.recorder.util.RecorderStatusHolder
 import kotlin.math.abs
@@ -359,11 +360,9 @@ class OverlayBallService : Service() {
     }
 
     private fun startRecording(type: RecorderType) {
-        // Reuses the very same "invisible start" path already used by the
-        // quick-settings tiles: MainActivity does the permission/consent
-        // dance (and, for video, the MediaProjection system dialog) and then
-        // hides itself again - the app the user was in stays in front.
-        val intent = Intent(this, MainActivity::class.java)
+        // 走 QuickActionActivity 这个透明入口：它完成权限/授权流程后直接开始
+        // 录制并退回后台，不会像 MainActivity 那样先画一帧启动画面。
+        val intent = Intent(this, QuickActionActivity::class.java)
             .putExtra(MainActivity.EXTRA_ACTION_KEY, type.name)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { startActivity(intent) }

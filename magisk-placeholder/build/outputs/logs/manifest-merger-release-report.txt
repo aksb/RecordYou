@@ -1,0 +1,29 @@
+-- Merging decision tree log ---
+manifest
+ADDED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml:2:1-10:12
+INJECTED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml:2:1-10:12
+INJECTED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml:2:1-10:12
+INJECTED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml:2:1-10:12
+	package
+		INJECTED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml
+	android:versionName
+		INJECTED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml
+	android:versionCode
+		INJECTED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml
+	xmlns:android
+		ADDED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml:2:11-69
+application
+ADDED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml:9:5-44
+INJECTED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml:9:5-44
+	android:extractNativeLibs
+		INJECTED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml
+	android:hasCode
+		ADDED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml:9:18-41
+uses-sdk
+INJECTED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml
+INJECTED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from D:\GitHub_source\RecordYou\magisk-placeholder\src\main\AndroidManifest.xml

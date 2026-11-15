@@ -9,4 +9,15 @@
 
     </style>
 
+    <!-- 快捷录制入口专用：全透明，系统不会绘制启动画面，避免点击后闪屏 -->
+    <style name="Theme.RecordYou.Transparent" parent="android:Theme.Translucent.NoTitleBar">
+
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+
+    </style>
+
 </resources>

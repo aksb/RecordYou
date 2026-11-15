@@ -7,10 +7,11 @@
 # boot script directly; use the "Action" button in the Magisk app (see
 # action.sh) to re-run this on demand and see the result immediately.
 #
-# NOTE: this only affects the RELEASE build (applicationId "com.bnyro.recorder").
-# The debug build uses "com.bnyro.recorder.debug" (see applicationIdSuffix in
-# app/build.gradle.kts) and is a different package - it does not inherit the
-# privileged status this module grants, and isn't covered by these commands.
+# NOTE: the privileged status this module grants only applies to the RELEASE
+# build (applicationId "com.bnyro.recorder"). The debug build uses
+# "com.bnyro.recorder.debug" (see applicationIdSuffix in app/build.gradle.kts)
+# and does not inherit it, but the appops-based commands in apply-keepalive.sh
+# still cover that package whenever it is installed.
 
 MODDIR=${0%/*}
 

@@ -13,3 +13,8 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# 正式签名钥匙与本地口令，绝不入库
+*.jks
+keystore.properties
+/tools/密钥备份_勿提交.txt

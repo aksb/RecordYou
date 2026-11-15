@@ -10,6 +10,7 @@ import androidx.core.graphics.drawable.IconCompat
 import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.ui.MainActivity
+import com.bnyro.recorder.ui.QuickActionActivity
 
 object ShortcutHelper {
     sealed class AppShortcut(
@@ -20,15 +21,17 @@ object ShortcutHelper {
         abstract fun buildIntent(context: Context): Intent
 
         object RecordAudio : AppShortcut(RecorderType.AUDIO.name, R.drawable.ic_audio, R.string.record_sound) {
-            override fun buildIntent(context: Context) = Intent(context, MainActivity::class.java).apply {
+            override fun buildIntent(context: Context) = Intent(context, QuickActionActivity::class.java).apply {
                 action = Intent.ACTION_VIEW
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 putExtra(MainActivity.EXTRA_ACTION_KEY, RecorderType.AUDIO.name)
             }
         }
 
         object RecordScreen : AppShortcut(RecorderType.VIDEO.name, R.drawable.ic_screen, R.string.record_screen) {
-            override fun buildIntent(context: Context) = Intent(context, MainActivity::class.java).apply {
+            override fun buildIntent(context: Context) = Intent(context, QuickActionActivity::class.java).apply {
                 action = Intent.ACTION_VIEW
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 putExtra(MainActivity.EXTRA_ACTION_KEY, RecorderType.VIDEO.name)
             }
         }

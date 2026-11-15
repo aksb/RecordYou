@@ -1,0 +1,7 @@
+com.bnyro.recorder.placeholder.magisk-placeholder-pngs-0 D:\GitHub_source\RecordYou\magisk-placeholder\build\generated\res\pngs\release
+com.bnyro.recorder.placeholder.magisk-placeholder-resValues-1 D:\GitHub_source\RecordYou\magisk-placeholder\build\generated\res\resValues\release
+com.bnyro.recorder.placeholder.magisk-placeholder-packageReleaseResources-2 D:\GitHub_source\RecordYou\magisk-placeholder\build\intermediates\incremental\release\packageReleaseResources\merged.dir
+com.bnyro.recorder.placeholder.magisk-placeholder-packageReleaseResources-3 D:\GitHub_source\RecordYou\magisk-placeholder\build\intermediates\incremental\release\packageReleaseResources\stripped.dir
+com.bnyro.recorder.placeholder.magisk-placeholder-merged_res-4 D:\GitHub_source\RecordYou\magisk-placeholder\build\intermediates\merged_res\release
+com.bnyro.recorder.placeholder.magisk-placeholder-main-5 D:\GitHub_source\RecordYou\magisk-placeholder\src\main\res
+com.bnyro.recorder.placeholder.magisk-placeholder-release-6 D:\GitHub_source\RecordYou\magisk-placeholder\src\release\res

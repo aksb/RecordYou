@@ -181,6 +181,6 @@ class MainActivity : ComponentActivity() {
 
         // 从悬浮球/快捷方式启动录屏时，晚一点再真正开始采集，
         // 避开"授权弹窗关闭 -> 退回上个应用"的过渡动画
-        private const val SHORTCUT_START_DELAY_MS = 700L
+        internal const val SHORTCUT_START_DELAY_MS = 700L
     }
 }

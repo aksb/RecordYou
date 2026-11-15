@@ -21,7 +21,7 @@
 所以流程是：**只需要刷一次这个模块**，把占位包"种"进系统分区；之后正常安装/升级
 真正的 RecordYou（release APK）就会继承特权状态，不需要每次发新版本都重新刷模块。
 
-## 重要：只对 release 包生效，且换版本前要先手动清掉旧的
+## 重要：只对 release 包生效
 
 `app/build.gradle.kts` 里 debug 构建有 `applicationIdSuffix = ".debug"`，最终包名是
 `com.bnyro.recorder.debug`，跟这个模块授权的 `com.bnyro.recorder`（release 包名）
@@ -29,17 +29,17 @@
 push 触发的私密测试构建，还是打 tag 触发的正式发布，编译的都是同一个 **release**
 包（`assembleRelease`），不再用 `.debug` 那份——也就是说日常 push 出来的测试包一样
 能测出内部音频、防杀后台这些特权功能，不用非得等打 tag。两者的区别只是发布方式：
-push 发到一个固定的 `test-build-latest` **draft**（草稿）Release，只有仓库协作者能
-看到；打 tag 发到一个正常公开的 Release。
+push 的产物进 Actions 的 Artifact（保留 14 天，只有你自己能下载），打 tag 的产物发到
+公开的 Release 页面。
 
-另外，这个项目没有配置正式签名 keystore（release 包用的是 CI 每次运行时临时生成
-的调试签名，见 `app/build.gradle.kts` 里 release 的 `signingConfig`）。这意味着
-**不同批次的构建之间签名并不一致**（不管是两次 push 之间，还是 push 和 tag 之间）：
-Android 要求"覆盖安装升级"必须用同一把签名，所以如果你已经装了某一次构建的
-release apk，再想装另一次构建的，大概率会遇到"签名不一致，安装失败"。解决方法
-很简单：**先卸载旧版本 App（或者卸载模块后重启，彻底清掉系统里的占位包），再安装
-新版本**，当成一次全新安装，而不是覆盖升级。这个项目仅供已 root 的个人/小范围
-使用，不考虑无缝升级，所以没有再去管理一把正式 keystore。
+签名方面：release 包和本模块里的占位包现在都用仓库根目录那把固定的正式钥匙
+`RecordYou.jks`（密码走 GitHub Secrets 注入，见 `.github/workflows/ci.yml`），所以同一把
+钥匙出的正式包之间可以正常覆盖升级，模块只需刷一次。
+
+只有一点例外：改造前用 CI 临时调试签名发出去的旧 APK，以及旧模块 zip 里的占位包，
+都是另一把旧钥匙。这种情况下**光卸载 App 不够**——`/system/priv-app` 里的占位包仍是旧
+签名，系统会拿它跟新 APK 比对，照样装不上。正确顺序是：先刷一次新的模块 zip（把占位包
+换成新签名）→ 重启 → 再安装新的 APK。换过来之后，后续升级就不用再管这套了。
 
 ## 模块内容如何生成
 
@@ -48,10 +48,10 @@ release apk，再想装另一次构建的，大概率会遇到"签名不一致�
   `apply-keepalive.sh` 源码放在 `common/` 目录下，`install.sh` 刷入时会自动把它们
   摊平到模块根目录，这是 Magisk 运行时期望的位置，`common/` 只是仓库里归档用的
   文件夹名）
-- `system/priv-app/RecordYou/RecordYou.apk`：由 CI（push 或打 tag 时）用
+- `system/priv-app/RecordYou/RecordYou.apk`：由 CI 在打 tag 时用
   `:magisk-placeholder` 子模块现编现放（`.gitkeep` 只是让空目录能被 git 跟踪，
-  实际这个 apk 不入库）。它和同一次 CI 里编出来的 release apk 用的是**同一台
-  运行机器当场生成的调试签名**，所以刷完模块后的第一次安装通常能直接装上去。
+  实际这个 apk 不入库）。它和同一次 CI 里编出来的 release apk 用的是**同一把**
+  正式签名，所以刷完模块后安装正式版可以直接覆盖上去。
 
 ## 手动重新执行保活命令
 
