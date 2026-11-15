@@ -32,6 +32,7 @@ object Preferences {
     const val floatingBallKey = "floatingBall"
     const val audioBallKey = "audioBall"
     const val videoBallKey = "videoBall"
+    const val hideBallInRecordingsKey = "hideBallInRecordings"
     private const val floatingBallSplitMigratedKey = "floatingBallSplitMigrated"
     const val videoResolutionKey = "videoResolution"
     // 旧版单球位置，仅供迁移使用

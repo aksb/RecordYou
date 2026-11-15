@@ -504,6 +504,12 @@ fun SettingsScreen() {
             Spacer(modifier = Modifier.height(5.dp))
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 CheckboxPref(
+                    prefKey = Preferences.hideBallInRecordingsKey,
+                    title = stringResource(R.string.hide_floating_ball_in_recordings),
+                    summary = stringResource(R.string.hide_floating_ball_in_recordings_desc)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                CheckboxPref(
                     prefKey = Preferences.showOverlayAnnotationToolKey,
                     title = stringResource(R.string.screen_recorder_annotation),
                     summary = stringResource(R.string.screen_recorder_annotation_desc)

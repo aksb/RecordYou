@@ -85,6 +85,8 @@
     <string name="floating_ball_other_recording">Another recording is in progress</string>
     <string name="toast_audio_stopped">Audio recording stopped</string>
     <string name="toast_screen_stopped">Screen recording stopped</string>
+    <string name="hide_floating_ball_in_recordings">Hide floating ball in recordings</string>
+    <string name="hide_floating_ball_in_recordings_desc">The floating ball stays visible on screen but is left out of the recorded video. On Android 14+ and some custom ROMs (e.g. MIUI) it shows up as a black block instead, so it is off by default.</string>
     <string name="custom">Custom</string>
     <string name="save">Save</string>
     <string name="mod_author">Mod author</string>

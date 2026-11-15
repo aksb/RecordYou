@@ -2,6 +2,7 @@ package com.bnyro.recorder.services
 
 import android.app.Service
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -100,6 +101,12 @@ abstract class FloatingBallService : Service() {
         }
     }
 
+    // 设置里的“录屏时隐藏悬浮球”是随时可改的，运行中的球要跟着生效
+    private val secureFlagListener =
+        SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == Preferences.hideBallInRecordingsKey) mainHandler.post { updateSecureFlag() }
+        }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -109,6 +116,7 @@ abstract class FloatingBallService : Service() {
         // Reports the current state immediately, so the ball looks right even
         // if a recording was already running before the ball was turned on.
         RecorderStatusHolder.addListener(stateListener)
+        Preferences.prefs.registerOnSharedPreferenceChangeListener(secureFlagListener)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -117,6 +125,7 @@ abstract class FloatingBallService : Service() {
 
     override fun onDestroy() {
         RecorderStatusHolder.removeListener(stateListener)
+        Preferences.prefs.unregisterOnSharedPreferenceChangeListener(secureFlagListener)
         mainHandler.removeCallbacksAndMessages(null)
         ballView?.let { runCatching { windowManager.removeView(it) } }
         ballView = null
@@ -171,7 +180,7 @@ abstract class FloatingBallService : Service() {
             size,
             size,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            windowFlags(),
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -287,6 +296,34 @@ abstract class FloatingBallService : Service() {
             .putExtra(MainActivity.EXTRA_ACTION_KEY, recorderType.name)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { startActivity(intent) }
+    }
+
+    /**
+     * 由设置项“录屏时隐藏悬浮球”控制，默认关闭：
+     * Android 14+/MIUI 会把 secure 图层涂成黑块，默认开启反而更奇怪。
+     */
+    private fun hideInRecordings(): Boolean =
+        Preferences.prefs.getBoolean(Preferences.hideBallInRecordingsKey, false)
+
+    /**
+     * FLAG_SECURE 会让系统在合成屏幕录制/截图时跳过这个悬浮窗：
+     * 屏幕上照常可见、可拖动、可点击，但 MediaProjection 录不到它。
+     */
+    private fun windowFlags(): Int =
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            (if (hideInRecordings()) WindowManager.LayoutParams.FLAG_SECURE else 0)
+
+    private fun updateSecureFlag() {
+        val ball = ballView ?: return
+        val params = ballParams ?: return
+        val newFlags = if (hideInRecordings()) {
+            params.flags or WindowManager.LayoutParams.FLAG_SECURE
+        } else {
+            params.flags and WindowManager.LayoutParams.FLAG_SECURE.inv()
+        }
+        if (newFlags == params.flags) return
+        params.flags = newFlags
+        runCatching { windowManager.updateViewLayout(ball, params) }
     }
 
     private fun updateBallAppearance() {

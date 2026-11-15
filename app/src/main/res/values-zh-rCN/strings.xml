@@ -77,6 +77,8 @@
     <string name="floating_ball_other_recording">另一种录制正在进行，请先停止</string>
     <string name="toast_audio_stopped">已停止录音</string>
     <string name="toast_screen_stopped">已停止录屏</string>
+    <string name="hide_floating_ball_in_recordings">录屏时隐藏悬浮球</string>
+    <string name="hide_floating_ball_in_recordings_desc">悬浮球仍显示在屏幕上，但不会出现在录制的视频里。Android 14 及以上或部分定制系统（如 MIUI）会把它变成黑块，这些机型不建议开启，因此默认关闭。</string>
     <string name="custom">自定义</string>
     <string name="save">保存</string>
     <string name="mod_author">修改版作者</string>
