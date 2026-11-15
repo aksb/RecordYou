@@ -28,18 +28,32 @@ object Preferences {
     const val namingPatternKey = "namingPattern"
     const val showOverlayAnnotationToolKey = "annotationTool"
     const val showVisualizerTimestamps = "visualizerTimestamp"
+    // 旧版只有一个悬浮球，仅供迁移使用
     const val floatingBallKey = "floatingBall"
+    const val audioBallKey = "audioBall"
+    const val videoBallKey = "videoBall"
+    private const val floatingBallSplitMigratedKey = "floatingBallSplitMigrated"
     const val videoResolutionKey = "videoResolution"
+    // 旧版单球位置，仅供迁移使用
     const val ballPosXPortraitKey = "ballPosXPortrait"
     const val ballPosYPortraitKey = "ballPosYPortrait"
     const val ballPosXLandscapeKey = "ballPosXLandscape"
     const val ballPosYLandscapeKey = "ballPosYLandscape"
+    const val audioBallPosXPortraitKey = "audioBallPosXPortrait"
+    const val audioBallPosYPortraitKey = "audioBallPosYPortrait"
+    const val audioBallPosXLandscapeKey = "audioBallPosXLandscape"
+    const val audioBallPosYLandscapeKey = "audioBallPosYLandscape"
+    const val videoBallPosXPortraitKey = "videoBallPosXPortrait"
+    const val videoBallPosYPortraitKey = "videoBallPosYPortrait"
+    const val videoBallPosXLandscapeKey = "videoBallPosXLandscape"
+    const val videoBallPosYLandscapeKey = "videoBallPosYLandscape"
     const val annotationXKey = "annotationX"
     const val annotationYKey = "annotationY"
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREF_FILE_NAME, Context.MODE_PRIVATE)
         migrateVideoAudioSettings()
+        migrateFloatingBallSettings()
     }
 
     /**
@@ -64,6 +78,31 @@ object Preferences {
         }
         editor.putBoolean(videoAudioSettingsMigratedKey, true)
         editor.apply()
+    }
+
+    /**
+     * 旧版本只有一个悬浮球。拆分后把原来的开关状态和位置交给录屏球，
+     * 升级后用户看到的球仍在原来的位置、仍然能录屏。
+     */
+    private fun migrateFloatingBallSettings() {
+        if (prefs.getBoolean(floatingBallSplitMigratedKey, false)) return
+
+        val editor = prefs.edit()
+        if (prefs.getBoolean(floatingBallKey, false)) {
+            editor.putBoolean(videoBallKey, true)
+        }
+        copyInt(editor, ballPosXPortraitKey, videoBallPosXPortraitKey)
+        copyInt(editor, ballPosYPortraitKey, videoBallPosYPortraitKey)
+        copyInt(editor, ballPosXLandscapeKey, videoBallPosXLandscapeKey)
+        copyInt(editor, ballPosYLandscapeKey, videoBallPosYLandscapeKey)
+        editor.putBoolean(floatingBallSplitMigratedKey, true)
+        editor.apply()
+    }
+
+    private fun copyInt(editor: SharedPreferences.Editor, from: String, to: String) {
+        if (prefs.contains(from)) {
+            editor.putInt(to, prefs.getInt(from, Int.MIN_VALUE))
+        }
     }
 
     fun edit(action: SharedPreferences.Editor.() -> Unit) {

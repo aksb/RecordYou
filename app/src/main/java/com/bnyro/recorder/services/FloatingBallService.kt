@@ -15,7 +15,11 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.WindowManager
 import android.widget.ImageView
+import android.widget.Toast
+import androidx.annotation.ColorInt
+import androidx.annotation.DrawableRes
 import androidx.annotation.RequiresApi
+import androidx.annotation.StringRes
 import androidx.core.content.ContextCompat
 import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.RecorderState
@@ -27,20 +31,48 @@ import com.bnyro.recorder.util.RecorderStatusHolder
 import kotlin.math.abs
 
 /**
- * A small draggable floating ball, shown on top of every other app, that lets
- * the user start audio/screen recording and stop an ongoing one without
- * switching back into RecordYou.
+ * A small draggable floating ball, shown on top of every other app, that starts
+ * and stops its own [recorderType] without switching back into RecordYou.
  *
- * - Tap while idle -> opens a small 2-button menu (record audio / record screen).
- * - Tap while recording -> stops the recording immediately.
+ * - Tap while idle -> starts a recording of [recorderType].
+ * - Tap while that recording is running -> stops it.
  * - Drag -> moves the ball anywhere on screen, kept within the screen bounds.
+ * - Long press -> intentionally does nothing, so it can never be triggered by
+ *   accident while trying to drag the ball.
  *
  * Requires the "display over other apps" permission (SYSTEM_ALERT_WINDOW),
  * which must already be granted before this service is started - see
- * the floating-ball toggle in SettingsScreen.
+ * [com.bnyro.recorder.util.FloatingBallHelper].
  */
 @RequiresApi(Build.VERSION_CODES.O)
-class OverlayBallService : Service() {
+abstract class FloatingBallService : Service() {
+    protected abstract val recorderType: RecorderType
+
+    @get:DrawableRes
+    protected abstract val idleIconRes: Int
+
+    /** 空闲状态下的球底色：录音球绿色，录屏球蓝色 */
+    @get:ColorInt
+    protected abstract val idleColor: Int
+
+    /** 录制结束（无论从球、通知栏还是应用内停止）时弹出的提示 */
+    @get:StringRes
+    protected abstract val stoppedMessageRes: Int
+
+    protected abstract val positionKeys: PositionKeys
+
+    /**
+     * When both balls have never been moved, their default position would be
+     * identical - so the video ball is placed one ball further down.
+     */
+    protected abstract val defaultSlot: Int
+
+    data class PositionKeys(
+        val portraitX: String,
+        val portraitY: String,
+        val landscapeX: String,
+        val landscapeY: String
+    )
 
     private lateinit var windowManager: WindowManager
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -48,22 +80,25 @@ class OverlayBallService : Service() {
     private var ballView: ImageView? = null
     private var ballParams: WindowManager.LayoutParams? = null
 
-    private var audioButton: ImageView? = null
-    private var videoButton: ImageView? = null
-    private var closeButton: ImageView? = null
-    private var menuShown = false
-
     private var downRawX = 0f
     private var downRawY = 0f
     private var downParamX = 0
     private var downParamY = 0
     private var dragging = false
+    private var wasRecording = false
 
-    private val stateListener: (RecorderState) -> Unit = { state ->
-        mainHandler.post { updateBallAppearance(state) }
+    private val stateListener: (RecorderType, RecorderState) -> Unit = { type, state ->
+        if (type == recorderType) {
+            // 录制刚结束时报一声，否则球只是悄悄变回空闲色，很难察觉
+            if (state == RecorderState.IDLE && wasRecording) {
+                mainHandler.post {
+                    Toast.makeText(this, stoppedMessageRes, Toast.LENGTH_SHORT).show()
+                }
+            }
+            wasRecording = state == RecorderState.ACTIVE
+            mainHandler.post { updateBallAppearance() }
+        }
     }
-
-    private val autoHideMenuRunnable = Runnable { hideMenu() }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -83,7 +118,6 @@ class OverlayBallService : Service() {
     override fun onDestroy() {
         RecorderStatusHolder.removeListener(stateListener)
         mainHandler.removeCallbacksAndMessages(null)
-        hideMenu()
         ballView?.let { runCatching { windowManager.removeView(it) } }
         ballView = null
         super.onDestroy()
@@ -97,8 +131,8 @@ class OverlayBallService : Service() {
     /**
      * Loads the last saved ball position for the current orientation, clamped
      * to the current screen bounds. Falls back to the default starting
-     * position (left edge, upper third of the screen) if nothing was saved
-     * yet, or if the saved position no longer fits the screen.
+     * position if nothing was saved yet, or if the saved position no longer
+     * fits the screen.
      */
     private fun defaultOrSavedPosition(): Pair<Int, Int> {
         val size = dpToPx(BALL_SIZE_DP)
@@ -107,21 +141,23 @@ class OverlayBallService : Service() {
         val maxX = (screenWidth - size).coerceAtLeast(0)
         val maxY = (screenHeight - size).coerceAtLeast(0)
 
-        val xKey = if (isLandscape()) Preferences.ballPosXLandscapeKey else Preferences.ballPosXPortraitKey
-        val yKey = if (isLandscape()) Preferences.ballPosYLandscapeKey else Preferences.ballPosYPortraitKey
+        val xKey = if (isLandscape()) positionKeys.landscapeX else positionKeys.portraitX
+        val yKey = if (isLandscape()) positionKeys.landscapeY else positionKeys.portraitY
         val savedX = Preferences.prefs.getInt(xKey, Int.MIN_VALUE)
         val savedY = Preferences.prefs.getInt(yKey, Int.MIN_VALUE)
 
+        val defaultY = (screenHeight / 3 + defaultSlot * (size + dpToPx(GAP_DP)))
+            .coerceIn(0, maxY)
         return if (savedX != Int.MIN_VALUE && savedY != Int.MIN_VALUE) {
             savedX.coerceIn(0, maxX) to savedY.coerceIn(0, maxY)
         } else {
-            0 to (screenHeight / 3).coerceIn(0, maxY)
+            0 to defaultY
         }
     }
 
     private fun savePosition(x: Int, y: Int) {
-        val xKey = if (isLandscape()) Preferences.ballPosXLandscapeKey else Preferences.ballPosXPortraitKey
-        val yKey = if (isLandscape()) Preferences.ballPosYLandscapeKey else Preferences.ballPosYPortraitKey
+        val xKey = if (isLandscape()) positionKeys.landscapeX else positionKeys.portraitX
+        val yKey = if (isLandscape()) positionKeys.landscapeY else positionKeys.portraitY
         Preferences.edit {
             putInt(xKey, x)
             putInt(yKey, y)
@@ -150,7 +186,7 @@ class OverlayBallService : Service() {
         runCatching { windowManager.addView(ball, params) }
         ballView = ball
         ballParams = params
-        updateBallAppearance(RecorderStatusHolder.state)
+        updateBallAppearance()
     }
 
     /**
@@ -163,7 +199,6 @@ class OverlayBallService : Service() {
         super.onConfigurationChanged(newConfig)
         val ball = ballView ?: return
         val params = ballParams ?: return
-        hideMenu()
         val (newX, newY) = defaultOrSavedPosition()
         params.x = newX
         params.y = newY
@@ -188,7 +223,6 @@ class OverlayBallService : Service() {
                 val dy = event.rawY - downRawY
                 if (!dragging && (abs(dx) > TOUCH_SLOP_PX || abs(dy) > TOUCH_SLOP_PX)) {
                     dragging = true
-                    hideMenu()
                 }
                 if (dragging) {
                     // 允许拖动到任意位置，但不能超出屏幕
@@ -226,174 +260,85 @@ class OverlayBallService : Service() {
 
     private fun onBallTapped() {
         ballView?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-        when (RecorderStatusHolder.state) {
-            RecorderState.IDLE -> toggleMenu()
-            RecorderState.ACTIVE -> sendRecorderAction(RecorderService.STOP_ACTION)
+        val otherType = if (recorderType == RecorderType.AUDIO) RecorderType.VIDEO else RecorderType.AUDIO
+        when {
+            RecorderStatusHolder.stateOf(recorderType) == RecorderState.ACTIVE -> stopRecording()
+            RecorderStatusHolder.stateOf(otherType) == RecorderState.ACTIVE ->
+                Toast.makeText(this, R.string.floating_ball_other_recording, Toast.LENGTH_SHORT)
+                    .show()
+
+            else -> startRecording()
         }
     }
 
-    private fun sendRecorderAction(action: String) {
+    private fun stopRecording() {
+        // 带上类型，只停本球对应的那种录制
         sendBroadcast(
             Intent(RecorderService.RECORDER_INTENT_ACTION)
-                .putExtra(RecorderService.ACTION_EXTRA_KEY, action)
+                .putExtra(RecorderService.ACTION_EXTRA_KEY, RecorderService.STOP_ACTION)
+                .putExtra(RecorderService.TYPE_EXTRA_KEY, recorderType.name)
         )
     }
 
-    private fun toggleMenu() {
-        if (menuShown) hideMenu() else showMenu()
-    }
-
-    private fun showMenu() {
-        if (menuShown) return
-        val ballParams = ballParams ?: return
-        val screenHeight = resources.displayMetrics.heightPixels
-        val ballSize = dpToPx(BALL_SIZE_DP)
-        val buttonSize = dpToPx(BUTTON_SIZE_DP)
-        val gap = dpToPx(GAP_DP)
-        // if the ball sits in the lower half of the screen, open the menu
-        // upwards so it doesn't get pushed off-screen
-        val expandUpwards = ballParams.y > screenHeight / 2
-
-        audioButton = addMenuButton(
-            iconRes = R.drawable.ic_audio,
-            bgColor = AUDIO_BUTTON_COLOR,
-            offsetIndex = 1,
-            buttonSize = buttonSize,
-            gap = gap,
-            ballSize = ballSize,
-            ballParams = ballParams,
-            expandUpwards = expandUpwards
-        ) { startRecording(RecorderType.AUDIO) }
-
-        videoButton = addMenuButton(
-            iconRes = R.drawable.ic_screen,
-            bgColor = VIDEO_BUTTON_COLOR,
-            offsetIndex = 2,
-            buttonSize = buttonSize,
-            gap = gap,
-            ballSize = ballSize,
-            ballParams = ballParams,
-            expandUpwards = expandUpwards
-        ) { startRecording(RecorderType.VIDEO) }
-
-        closeButton = addMenuButton(
-            iconRes = android.R.drawable.ic_menu_close_clear_cancel,
-            bgColor = ContextCompat.getColor(this, android.R.color.darker_gray),
-            offsetIndex = 3,
-            buttonSize = buttonSize,
-            gap = gap,
-            ballSize = ballSize,
-            ballParams = ballParams,
-            expandUpwards = expandUpwards
-        ) { closeBall() }
-
-        menuShown = true
-        mainHandler.postDelayed(autoHideMenuRunnable, MENU_AUTO_HIDE_MS)
-    }
-
-    private fun addMenuButton(
-        iconRes: Int,
-        bgColor: Int,
-        offsetIndex: Int,
-        buttonSize: Int,
-        gap: Int,
-        ballSize: Int,
-        ballParams: WindowManager.LayoutParams,
-        expandUpwards: Boolean,
-        onClick: () -> Unit
-    ): ImageView {
-        val button = ImageView(this).apply {
-            setImageResource(iconRes)
-            setColorFilter(ContextCompat.getColor(context, android.R.color.white))
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(bgColor)
-            }
-            val pad = dpToPx(10)
-            setPadding(pad, pad, pad, pad)
-            setOnClickListener {
-                onClick()
-                hideMenu()
-            }
-        }
-        val yOffset = (buttonSize + gap) * offsetIndex
-        val params = WindowManager.LayoutParams(
-            buttonSize,
-            buttonSize,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = ballParams.x + (ballSize - buttonSize) / 2
-            y = if (expandUpwards) {
-                ballParams.y - yOffset
-            } else {
-                ballParams.y + ballSize + yOffset - buttonSize
-            }
-        }
-        runCatching { windowManager.addView(button, params) }
-        return button
-    }
-
-    private fun hideMenu() {
-        if (!menuShown) return
-        mainHandler.removeCallbacks(autoHideMenuRunnable)
-        audioButton?.let { runCatching { windowManager.removeView(it) } }
-        videoButton?.let { runCatching { windowManager.removeView(it) } }
-        closeButton?.let { runCatching { windowManager.removeView(it) } }
-        audioButton = null
-        videoButton = null
-        closeButton = null
-        menuShown = false
-    }
-
-    /**
-     * Called from the menu's "close" button - hides the floating ball right
-     * away without having to go back into the app's settings, and keeps the
-     * settings screen / quick-settings tile in sync with the new state.
-     */
-    private fun closeBall() {
-        Preferences.edit { putBoolean(Preferences.floatingBallKey, false) }
-        FloatingBallTile.requestTileRefresh(this)
-        stopSelf()
-    }
-
-    private fun startRecording(type: RecorderType) {
+    private fun startRecording() {
         // 走 QuickActionActivity 这个透明入口：它完成权限/授权流程后直接开始
         // 录制并退回后台，不会像 MainActivity 那样先画一帧启动画面。
         val intent = Intent(this, QuickActionActivity::class.java)
-            .putExtra(MainActivity.EXTRA_ACTION_KEY, type.name)
+            .putExtra(MainActivity.EXTRA_ACTION_KEY, recorderType.name)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { startActivity(intent) }
     }
 
-    private fun updateBallAppearance(state: RecorderState) {
+    private fun updateBallAppearance() {
         val ball = ballView ?: return
-        val (bgColorRes, iconRes) = when (state) {
-            RecorderState.IDLE ->
-                android.R.color.darker_gray to android.R.drawable.ic_input_add
-            RecorderState.ACTIVE ->
-                android.R.color.holo_red_dark to R.drawable.ic_stop_square
-        }
+        val recording = RecorderStatusHolder.stateOf(recorderType) == RecorderState.ACTIVE
         ball.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
-            setColor(ContextCompat.getColor(this@OverlayBallService, bgColorRes))
+            setColor(
+                if (recording) {
+                    ContextCompat.getColor(this@FloatingBallService, android.R.color.holo_red_dark)
+                } else {
+                    idleColor
+                }
+            )
         }
-        ball.setImageResource(iconRes)
-        ball.setColorFilter(ContextCompat.getColor(this@OverlayBallService, android.R.color.white))
-        if (state == RecorderState.IDLE) hideMenu()
+        ball.setImageResource(if (recording) R.drawable.ic_stop_square else idleIconRes)
+        ball.setColorFilter(ContextCompat.getColor(this@FloatingBallService, android.R.color.white))
     }
 
     companion object {
         private const val BALL_SIZE_DP = 56
-        private const val BUTTON_SIZE_DP = 56
-        private const val GAP_DP = 8
+        private const val GAP_DP = 12
         private const val TOUCH_SLOP_PX = 16
-        private const val MENU_AUTO_HIDE_MS = 4000L
-
-        // 录音按钮：绿色；录像按钮：蓝色 - 图标本身保持白色不变
-        private val AUDIO_BUTTON_COLOR = Color.parseColor("#2E7D32")
-        private val VIDEO_BUTTON_COLOR = Color.parseColor("#1565C0")
     }
+}
+
+@RequiresApi(Build.VERSION_CODES.O)
+class AudioBallService : FloatingBallService() {
+    override val recorderType = RecorderType.AUDIO
+    override val idleIconRes = R.drawable.ic_audio
+    override val idleColor = Color.parseColor("#2E7D32")
+    override val stoppedMessageRes = R.string.toast_audio_stopped
+    override val defaultSlot = 0
+    override val positionKeys = PositionKeys(
+        Preferences.audioBallPosXPortraitKey,
+        Preferences.audioBallPosYPortraitKey,
+        Preferences.audioBallPosXLandscapeKey,
+        Preferences.audioBallPosYLandscapeKey
+    )
+}
+
+@RequiresApi(Build.VERSION_CODES.O)
+class VideoBallService : FloatingBallService() {
+    override val recorderType = RecorderType.VIDEO
+    override val idleIconRes = R.drawable.ic_screen
+    override val idleColor = Color.parseColor("#1565C0")
+    override val stoppedMessageRes = R.string.toast_screen_stopped
+    override val defaultSlot = 1
+    override val positionKeys = PositionKeys(
+        Preferences.videoBallPosXPortraitKey,
+        Preferences.videoBallPosYPortraitKey,
+        Preferences.videoBallPosXLandscapeKey,
+        Preferences.videoBallPosYLandscapeKey
+    )
 }

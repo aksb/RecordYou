@@ -21,6 +21,7 @@ import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.RecorderState
+import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.receivers.FinishedNotificationReceiver
 import com.bnyro.recorder.ui.MainActivity
 import com.bnyro.recorder.util.NotificationHelper
@@ -32,6 +33,9 @@ import kotlinx.coroutines.withContext
 
 abstract class RecorderService : LifecycleService() {
     abstract val notificationTitle: String
+
+    /** 本服务负责的录制类型，用于区分状态并按类型响应停止广播 */
+    abstract val recorderType: RecorderType
 
     private val binder = LocalBinder()
     var recorder: MediaRecorder? = null
@@ -45,9 +49,11 @@ abstract class RecorderService : LifecycleService() {
 
     private val recorderReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.getStringExtra(ACTION_EXTRA_KEY)) {
-                STOP_ACTION -> onDestroy()
-            }
+            if (intent?.getStringExtra(ACTION_EXTRA_KEY) != STOP_ACTION) return
+            // 悬浮球只停自己那一种录制；不带类型的（通知栏停止按钮）停所有录制
+            val targetType = intent.getStringExtra(TYPE_EXTRA_KEY)
+            if (targetType != null && targetType != recorderType.name) return
+            onDestroy()
         }
     }
 
@@ -125,7 +131,7 @@ abstract class RecorderService : LifecycleService() {
         runCatching {
             recorderState = RecorderState.ACTIVE
             onRecorderStateChanged(recorderState)
-            RecorderStatusHolder.updateState(recorderState)
+            RecorderStatusHolder.updateState(recorderType, recorderState)
         }
         updateNotification()
     }
@@ -137,7 +143,7 @@ abstract class RecorderService : LifecycleService() {
         runCatching {
             recorderState = RecorderState.IDLE
             onRecorderStateChanged(recorderState)
-            RecorderStatusHolder.updateState(recorderState)
+            RecorderStatusHolder.updateState(recorderType, recorderState)
         }
 
         NotificationManagerCompat.from(this)
@@ -226,6 +232,7 @@ abstract class RecorderService : LifecycleService() {
         const val RECORDER_INTENT_ACTION = "com.bnyro.recorder.RECORDER_ACTION"
         const val FILE_NAME_EXTRA_KEY = "fileName"
         const val ACTION_EXTRA_KEY = "action"
+        const val TYPE_EXTRA_KEY = "recorderType"
         const val START_DELAY_EXTRA_KEY = "startDelayMs"
         const val STOP_ACTION = "STOP"
         const val DELETE_ACTION = "DELETE"

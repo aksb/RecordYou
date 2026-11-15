@@ -58,6 +58,11 @@ android {
     }
 
     buildTypes {
+        // debug 占位包给 debug 版真包（com.bnyro.recorder.debug）用：
+        // 包名要跟着后缀走，签名则是本机默认的 debug 钥匙，两者才能互相覆盖。
+        debug {
+            applicationIdSuffix = ".debug"
+        }
         release {
             isMinifyEnabled = false
             if (canSignRelease) {

@@ -66,7 +66,11 @@
             android:foregroundServiceType="microphone" />
 
         <service
-            android:name=".services.OverlayBallService"
+            android:name=".services.AudioBallService"
+            android:exported="false" />
+
+        <service
+            android:name=".services.VideoBallService"
             android:exported="false" />
 
         <receiver
@@ -111,10 +115,23 @@
         </service>
 
         <service
-            android:name=".services.FloatingBallTile"
+            android:name=".services.AudioBallTile"
             android:exported="true"
-            android:icon="@drawable/ic_screen_record"
-            android:label="@string/tile_toggle_floating_ball"
+            android:icon="@drawable/ic_audio"
+            android:label="@string/tile_audio_ball"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+
+        </service>
+
+        <service
+            android:name=".services.VideoBallTile"
+            android:exported="true"
+            android:icon="@drawable/ic_screen"
+            android:label="@string/tile_video_ball"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
 
             <intent-filter>

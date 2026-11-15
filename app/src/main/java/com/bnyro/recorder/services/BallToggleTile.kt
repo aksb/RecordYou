@@ -10,17 +10,18 @@ import android.provider.Settings
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import androidx.annotation.RequiresApi
+import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.util.FloatingBallHelper
-import com.bnyro.recorder.util.Preferences
 
 /**
- * Toggle-style quick-settings tile for the floating ball: one tap turns it
- * on, another tap turns it back off. Kept in sync with the toggle button on
- * the main screen and with the ball's own "close" button via
- * [requestTileRefresh], since none of those update the tile automatically.
+ * Toggle-style quick-settings tile for one floating ball: one tap turns it on,
+ * another tap turns it back off. Kept in sync with the toggles on the main
+ * screen via [requestTileRefresh], since neither those nor the automatic
+ * "close the other ball" behaviour update tiles automatically.
  */
 @RequiresApi(Build.VERSION_CODES.N)
-class FloatingBallTile : TileService() {
+abstract class BallToggleTile : TileService() {
+    protected abstract val ballType: RecorderType
 
     override fun onStartListening() {
         super.onStartListening()
@@ -31,7 +32,7 @@ class FloatingBallTile : TileService() {
         super.onClick()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
-        val currentlyEnabled = Preferences.prefs.getBoolean(Preferences.floatingBallKey, false)
+        val currentlyEnabled = FloatingBallHelper.isEnabled(this, ballType)
 
         if (!currentlyEnabled && !Settings.canDrawOverlays(this)) {
             // Can't request a runtime permission from a tile - send the user
@@ -54,12 +55,12 @@ class FloatingBallTile : TileService() {
             return
         }
 
-        FloatingBallHelper.setEnabled(this, !currentlyEnabled)
+        FloatingBallHelper.setEnabled(this, ballType, !currentlyEnabled)
         refreshState()
     }
 
     private fun refreshState() {
-        val enabled = FloatingBallHelper.isEnabled(this)
+        val enabled = FloatingBallHelper.isEnabled(this, ballType)
         qsTile?.state = if (enabled) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         qsTile?.updateTile()
     }
@@ -68,16 +69,26 @@ class FloatingBallTile : TileService() {
         private const val PENDING_INTENT_REQUEST_CODE = 22
 
         /**
-         * Tells the system to re-query this tile's state. Call this any time
-         * the floating ball is turned on/off from somewhere other than the
-         * tile itself (main screen toggle, the ball's own close button),
-         * otherwise the tile would keep showing a stale icon.
+         * Tells the system to re-query both ball tiles. Call this any time a
+         * ball is turned on/off from somewhere other than the tile itself
+         * (main screen toggles, the other ball's tile).
          */
         fun requestTileRefresh(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
-            runCatching {
-                requestListeningState(context, ComponentName(context, FloatingBallTile::class.java))
+            val tiles = listOf(AudioBallTile::class.java, VideoBallTile::class.java)
+            tiles.forEach { tile ->
+                runCatching { requestListeningState(context, ComponentName(context, tile)) }
             }
         }
     }
+}
+
+@RequiresApi(Build.VERSION_CODES.N)
+class AudioBallTile : BallToggleTile() {
+    override val ballType = RecorderType.AUDIO
+}
+
+@RequiresApi(Build.VERSION_CODES.N)
+class VideoBallTile : BallToggleTile() {
+    override val ballType = RecorderType.VIDEO
 }

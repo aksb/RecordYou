@@ -21,12 +21,12 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.rememberNavController
 import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.enums.ThemeMode
-import com.bnyro.recorder.services.OverlayBallService
+import com.bnyro.recorder.services.AudioBallService
+import com.bnyro.recorder.services.VideoBallService
 import com.bnyro.recorder.ui.models.RecorderModel
 import com.bnyro.recorder.ui.models.ThemeModel
 import com.bnyro.recorder.ui.theme.RecordYouTheme
 import com.bnyro.recorder.util.FloatingBallHelper
-import com.bnyro.recorder.util.Preferences
 
 class MainActivity : ComponentActivity() {
     private var initialRecorder = RecorderType.NONE
@@ -61,7 +61,7 @@ class MainActivity : ComponentActivity() {
             getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
         processIntent(intent)
-        ensureFloatingBallRunning()
+        ensureFloatingBallsRunning()
         enableEdgeToEdge()
 
         setContent {
@@ -90,18 +90,21 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * If the user has the floating ball enabled and the overlay permission is
-     * still granted, (re-)start [OverlayBallService]. This is a no-op if it's
-     * already running - it just makes sure the ball comes back after the
+     * If the user has a floating ball enabled and the overlay permission is
+     * still granted, (re-)start its service. This is a no-op if it's already
+     * running - it just makes sure the ball comes back after the
      * process/service got killed by the system while RecordYou was in the
      * background.
      */
-    private fun ensureFloatingBallRunning() {
-        val enabled = Preferences.prefs.getBoolean(Preferences.floatingBallKey, false)
-        if (!enabled) return
+    private fun ensureFloatingBallsRunning() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         if (!Settings.canDrawOverlays(this)) return
-        startService(Intent(this, OverlayBallService::class.java))
+        if (FloatingBallHelper.isEnabled(this, RecorderType.AUDIO)) {
+            startService(Intent(this, AudioBallService::class.java))
+        }
+        if (FloatingBallHelper.isEnabled(this, RecorderType.VIDEO)) {
+            startService(Intent(this, VideoBallService::class.java))
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -111,7 +114,10 @@ class MainActivity : ComponentActivity() {
 
     private fun processIntent(intent: Intent) {
         if (intent.action == ACTION_ENABLE_FLOATING_BALL) {
-            handleEnableFloatingBallShortcut()
+            val type = intent.getStringExtra(EXTRA_BALL_TYPE_KEY)?.let { name ->
+                runCatching { RecorderType.valueOf(name) }.getOrNull()
+            } ?: RecorderType.NONE
+            handleEnableFloatingBallShortcut(type)
             return
         }
 
@@ -142,15 +148,16 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Handles the "开启悬浮球" launcher shortcut (long-press the app icon).
-     * If the overlay permission is already granted, turns the ball on and
-     * quietly returns to whatever app the user was in - same "invisible
+     * Handles the "开启录音球/录屏球" launcher shortcut (long-press the app
+     * icon). If the overlay permission is already granted, turns the ball on
+     * and quietly returns to whatever app the user was in - same "invisible
      * start" pattern used for the audio/video quick actions. Otherwise sends
      * the user to the system permission screen; they'll need to trigger the
      * shortcut again afterwards.
      */
-    private fun handleEnableFloatingBallShortcut() {
-        if (FloatingBallHelper.setEnabled(this, true)) {
+    private fun handleEnableFloatingBallShortcut(type: RecorderType) {
+        if (type == RecorderType.NONE) return
+        if (FloatingBallHelper.setEnabled(this, type, true)) {
             exitAfterRecordingStart = true
         }
     }
@@ -177,6 +184,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_ACTION_KEY = "action"
+        const val EXTRA_BALL_TYPE_KEY = "ballType"
         const val ACTION_ENABLE_FLOATING_BALL = "com.bnyro.recorder.action.ENABLE_FLOATING_BALL"
 
         // 从悬浮球/快捷方式启动录屏时，晚一点再真正开始采集，

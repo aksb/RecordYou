@@ -12,6 +12,7 @@ import androidx.documentfile.provider.DocumentFile
 import com.bnyro.recorder.App
 import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.RecorderState
+import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.util.PcmConverter
 import java.io.File
 import kotlin.concurrent.thread
@@ -22,6 +23,8 @@ import kotlin.experimental.or
 class LosslessRecorderService : RecorderService() {
     override val notificationTitle: String
         get() = getString(R.string.recording_audio)
+
+    override val recorderType = RecorderType.AUDIO
 
     override val fgServiceType: Int?
         get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {

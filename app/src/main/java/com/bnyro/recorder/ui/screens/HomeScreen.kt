@@ -2,6 +2,7 @@ package com.bnyro.recorder.ui.screens
 
 import android.view.SoundEffectConstants
 import androidx.activity.ComponentActivity
+import androidx.annotation.StringRes
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -76,18 +77,22 @@ fun HomeScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    var floatingBallEnabled by remember {
-        mutableStateOf(FloatingBallHelper.isEnabled(context))
+    var audioBallEnabled by remember {
+        mutableStateOf(FloatingBallHelper.isEnabled(context, RecorderType.AUDIO))
     }
-    // Turning the ball on when the overlay permission is missing sends the
+    var videoBallEnabled by remember {
+        mutableStateOf(FloatingBallHelper.isEnabled(context, RecorderType.VIDEO))
+    }
+    // Turning a ball on when the overlay permission is missing sends the
     // person to a system settings screen rather than updating anything here
     // directly - re-check the real state whenever this screen comes back
-    // into the foreground, so the button reflects what they actually did
+    // into the foreground, so the buttons reflect what they actually did
     // over there instead of going stale.
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                floatingBallEnabled = FloatingBallHelper.isEnabled(context)
+                audioBallEnabled = FloatingBallHelper.isEnabled(context, RecorderType.AUDIO)
+                videoBallEnabled = FloatingBallHelper.isEnabled(context, RecorderType.VIDEO)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -111,47 +116,18 @@ fun HomeScreen(
 
     var showDeleteDialog by remember { mutableStateOf(false) }
 
-    fun enableFloatingBall() {
-        if (FloatingBallHelper.setEnabled(context, true)) {
-            floatingBallEnabled = true
-        }
+    // 开启一个球会自动关闭另一个（正在录制时则直接拒绝），所以这里统一
+    // 按真实状态回读两个开关，而不是只翻转被点的那个。
+    fun toggleFloatingBall(type: RecorderType) {
+        val enabled = if (type == RecorderType.AUDIO) audioBallEnabled else videoBallEnabled
+        FloatingBallHelper.setEnabled(context, type, !enabled)
+        audioBallEnabled = FloatingBallHelper.isEnabled(context, RecorderType.AUDIO)
+        videoBallEnabled = FloatingBallHelper.isEnabled(context, RecorderType.VIDEO)
     }
 
     Scaffold(modifier = Modifier.fillMaxSize(), topBar = {
         Column {
             TopAppBar(title = { Text(stringResource(R.string.app_name)) }, actions = {
-                TextButton(
-                    onClick = {
-                        view.playSoundEffect(SoundEffectConstants.CLICK)
-                        if (floatingBallEnabled) {
-                            if (FloatingBallHelper.setEnabled(context, false)) {
-                                floatingBallEnabled = false
-                            }
-                        } else {
-                            enableFloatingBall()
-                        }
-                    }
-                ) {
-                    Icon(
-                        imageVector = if (floatingBallEnabled) {
-                            Icons.Default.RadioButtonChecked
-                        } else {
-                            Icons.Default.RadioButtonUnchecked
-                        },
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = stringResource(
-                            if (floatingBallEnabled) {
-                                R.string.close_floating_ball
-                            } else {
-                                R.string.shortcut_enable_floating_ball
-                            }
-                        )
-                    )
-                }
                 ClickableIcon(
                     imageVector = Icons.Default.Settings,
                     contentDescription = stringResource(R.string.settings)
@@ -159,6 +135,27 @@ fun HomeScreen(
                     onNavigate(Destination.Settings)
                 }
             })
+            // 两个悬浮球各自独立开关，放在标题下方单独一行，
+            // 避免和标题、设置图标挤在一起换行。
+            Row(
+                modifier = Modifier.padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FloatingBallToggle(
+                    enabled = audioBallEnabled,
+                    label = R.string.tile_audio_ball
+                ) {
+                    view.playSoundEffect(SoundEffectConstants.CLICK)
+                    toggleFloatingBall(RecorderType.AUDIO)
+                }
+                FloatingBallToggle(
+                    enabled = videoBallEnabled,
+                    label = R.string.tile_video_ball
+                ) {
+                    view.playSoundEffect(SoundEffectConstants.CLICK)
+                    toggleFloatingBall(RecorderType.VIDEO)
+                }
+            }
             // Kept off the title row on purpose - cramming these in with the
             // floating-ball toggle and settings icon pushed the title onto a
             // second line and made the actions wrap unpredictably.
@@ -297,5 +294,26 @@ fun HomeScreen(
         ) {
             playerModel.deleteFiles(fallbackItems = currentItems)
         }
+    }
+}
+
+@Composable
+private fun FloatingBallToggle(
+    enabled: Boolean,
+    @StringRes label: Int,
+    onClick: () -> Unit
+) {
+    TextButton(onClick = onClick) {
+        Icon(
+            imageVector = if (enabled) {
+                Icons.Default.RadioButtonChecked
+            } else {
+                Icons.Default.RadioButtonUnchecked
+            },
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(text = stringResource(label))
     }
 }

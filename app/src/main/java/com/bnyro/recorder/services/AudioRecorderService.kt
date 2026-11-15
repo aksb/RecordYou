@@ -15,6 +15,7 @@ import com.bnyro.recorder.App
 import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.AudioChannels
 import com.bnyro.recorder.enums.AudioSource
+import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.util.PlayerHelper
 import com.bnyro.recorder.util.Preferences
 import com.bnyro.recorder.util.SystemAudioRecorder
@@ -22,6 +23,8 @@ import com.bnyro.recorder.util.SystemAudioRecorder
 class AudioRecorderService : RecorderService() {
     override val notificationTitle: String
         get() = getString(R.string.recording_audio)
+
+    override val recorderType = RecorderType.AUDIO
 
     private var mediaProjection: MediaProjection? = null
     private var systemAudioRecorder: SystemAudioRecorder? = null

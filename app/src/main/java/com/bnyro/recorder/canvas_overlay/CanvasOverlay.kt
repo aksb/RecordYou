@@ -21,6 +21,7 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.bnyro.recorder.enums.RecorderState
+import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.ui.theme.RecordYouTheme
 import com.bnyro.recorder.util.Preferences
 import com.bnyro.recorder.util.RecorderStatusHolder
@@ -35,12 +36,12 @@ class CanvasOverlay(context: Context) {
 
     // Stops the annotation overlay when the recording ends from anywhere
     // (notification, floating ball, ...), not just from inside the app.
-    // 注册时 RecorderStatusHolder 会立刻回调一次当前状态，这次要跳过，
-    // 否则刚显示出来就会被当成"已停止"。
-    private val stateListener: (RecorderState) -> Unit = { state ->
+    // 注册时若录屏已在录制中，RecorderStatusHolder 会立刻回调一次当前状态，
+    // 这次要跳过，否则刚显示出来就会被当成"已停止"。
+    private val stateListener: (RecorderType, RecorderState) -> Unit = { type, state ->
         if (!firstStateSkipped) {
             firstStateSkipped = true
-        } else if (state == RecorderState.IDLE) {
+        } else if (type == RecorderType.VIDEO && state == RecorderState.IDLE) {
             remove()
         }
     }

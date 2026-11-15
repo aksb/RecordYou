@@ -24,6 +24,7 @@ import com.bnyro.recorder.App
 import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.AudioChannels
 import com.bnyro.recorder.enums.AudioSource
+import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.enums.VideoFormat
 import com.bnyro.recorder.obj.VideoResolution
 import com.bnyro.recorder.util.MediaMerger
@@ -35,6 +36,8 @@ import java.io.File
 class ScreenRecorderService : RecorderService() {
     override val notificationTitle: String
         get() = getString(R.string.recording_screen)
+
+    override val recorderType = RecorderType.VIDEO
 
     private var virtualDisplay: VirtualDisplay? = null
     private var mediaProjection: MediaProjection? = null

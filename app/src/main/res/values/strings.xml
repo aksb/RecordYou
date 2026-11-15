@@ -78,9 +78,13 @@
     <string name="quality_high">High</string>
     <string name="quality_medium">Medium</string>
     <string name="quality_low">Low</string>
-    <string name="close_floating_ball">Close floating ball</string>
-    <string name="tile_toggle_floating_ball">Floating ball</string>
-    <string name="shortcut_enable_floating_ball">Enable floating ball</string>
+    <string name="tile_audio_ball">Audio ball</string>
+    <string name="tile_video_ball">Screen ball</string>
+    <string name="shortcut_enable_audio_ball">Enable audio ball</string>
+    <string name="shortcut_enable_video_ball">Enable screen ball</string>
+    <string name="floating_ball_other_recording">Another recording is in progress</string>
+    <string name="toast_audio_stopped">Audio recording stopped</string>
+    <string name="toast_screen_stopped">Screen recording stopped</string>
     <string name="custom">Custom</string>
     <string name="save">Save</string>
     <string name="mod_author">Mod author</string>
