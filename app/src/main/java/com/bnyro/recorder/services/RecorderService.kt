@@ -18,7 +18,6 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.LifecycleService
-import androidx.lifecycle.lifecycleScope
 import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.RecorderState
 import com.bnyro.recorder.enums.RecorderType
@@ -27,7 +26,9 @@ import com.bnyro.recorder.ui.MainActivity
 import com.bnyro.recorder.util.NotificationHelper
 import com.bnyro.recorder.util.PermissionHelper
 import com.bnyro.recorder.util.RecorderStatusHolder
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -42,10 +43,32 @@ abstract class RecorderService : LifecycleService() {
     var fileDescriptor: ParcelFileDescriptor? = null
     var outputFile: DocumentFile? = null
 
-    var onRecorderStateChanged: (RecorderState) -> Unit = {}
     open val fgServiceType: Int? = null
 
     var recorderState: RecorderState = RecorderState.IDLE
+
+    /** 防止显式停止和系统销毁各跑一遍收尾（合流、写 moov） */
+    @Volatile
+    private var cleanedUp = false
+
+    /** 一个服务实例只允许真正启动一次，重复的启动请求直接忽略 */
+    @Volatile
+    private var startRequested = false
+
+    /** 已经开始收尾（收尾可能发生在框架真正销毁服务之前） */
+    protected val isShuttingDown: Boolean
+        get() = cleanedUp
+
+    /**
+     * 占用一次启动机会。重复绑定/重复点击都会再次调用 [start]，如果没有
+     * 这个标记，同一个实例会创建第二个 MediaRecorder，而停止时只会停掉
+     * 其中一个，表现为“怎么点都停不下来”。
+     */
+    protected fun acquireStart(): Boolean {
+        if (startRequested || cleanedUp) return false
+        startRequested = true
+        return true
+    }
 
     private val recorderReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -130,7 +153,6 @@ abstract class RecorderService : LifecycleService() {
     open fun start() {
         runCatching {
             recorderState = RecorderState.ACTIVE
-            onRecorderStateChanged(recorderState)
             RecorderStatusHolder.updateState(recorderType, recorderState)
         }
         updateNotification()
@@ -140,16 +162,41 @@ abstract class RecorderService : LifecycleService() {
     protected open suspend fun onRecordingStopped() {}
 
     override fun onDestroy() {
-        runCatching {
-            recorderState = RecorderState.IDLE
-            onRecorderStateChanged(recorderState)
-            RecorderStatusHolder.updateState(recorderType, recorderState)
-        }
+        // 停止广播、MediaProjection 回调和系统销毁都会走到这里：
+        // cleanedUp 保证收尾只跑一遍（上一次已经把 super.onDestroy() 调用过了）。
+        if (cleanedUp) return
+        cleanedUp = true
+
+        // 本地状态立即置空闲（无损录音的写线程依赖它退出），但对外状态
+        // 要等收尾（合流、写 moov）完成后再更新：否则停止后马上开始新的
+        // 录制时，旧实例仍在收尾，两个实例抢 MediaProjection / 内部音频
+        // 会导致崩溃或 0KB 文件。
+        runCatching { recorderState = RecorderState.IDLE }
 
         NotificationManagerCompat.from(this)
             .cancel(NotificationHelper.RECORDING_NOTIFICATION_ID)
+        runCatching {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        }
+        // 服务同时被 startForegroundService 启动、又被 ViewModel 绑定。
+        // 不调用 stopSelf() 时框架会认为服务仍在运行，停止后实例永远不会
+        // 被销毁，下次启动复用这个已收尾的实例，就再也停不下来了。
+        runCatching { stopSelf() }
 
-        lifecycleScope.launch {
+        // 必须同步注销：super.onDestroy() 之后服务对象就被框架回收，
+        // 留到异步收尾再注销会让 ActivityThread 报 IntentReceiverLeaked。
+        runCatching { unregisterReceiver(recorderReceiver) }
+
+        // 收尾不能用 lifecycleScope：下面 super.onDestroy() 会把生命周期
+        // 置为 DESTROYED 并立刻取消该 scope，导致合流写不完、对外状态
+        // 永远停在 ACTIVE。这里挂到进程级 scope 上。
+        cleanupScope.launch { finishCleanup() }
+
+        super.onDestroy()
+    }
+
+    private suspend fun finishCleanup() {
+        runCatching {
             withContext(Dispatchers.IO) {
                 recorder?.runCatching {
                     stop()
@@ -162,16 +209,9 @@ abstract class RecorderService : LifecycleService() {
 
             createRecordingFinishedNotification()
             outputFile = null
-
-            runCatching {
-                unregisterReceiver(recorderReceiver)
-            }
-
-            ServiceCompat.stopForeground(this@RecorderService, ServiceCompat.STOP_FOREGROUND_REMOVE)
-            stopSelf()
-
-            super.onDestroy()
         }
+
+        RecorderStatusHolder.updateState(recorderType, RecorderState.IDLE)
     }
 
     @SuppressLint("MissingPermission")
@@ -237,5 +277,11 @@ abstract class RecorderService : LifecycleService() {
         const val STOP_ACTION = "STOP"
         const val DELETE_ACTION = "DELETE"
         const val SHARE_ACTION = "SHARE"
+
+        /**
+         * 进程级收尾线程。不能用服务自己的 lifecycleScope：onDestroy 之后
+         * 生命周期即被销毁，scope 会连带取消尚未完成的收尾任务。
+         */
+        private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     }
 }

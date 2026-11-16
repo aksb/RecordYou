@@ -34,12 +34,16 @@ class LosslessRecorderService : RecorderService() {
         }
 
     private var audioRecorder: AudioRecord? = null
+    private var isDestroying = false
     private var recorderThread: Thread? = null
     private var pcmConverter: PcmConverter? = null
     private var currentMaxAmplitude: Int? = null
 
     @SuppressLint("MissingPermission")
     override fun start() {
+        // 同一个服务实例只启动一次，避免重复启动后无法停止
+        if (!acquireStart()) return
+
         super.start()
 
         val audioFormat: AudioFormat = AudioFormat.Builder()
@@ -126,6 +130,9 @@ class LosslessRecorderService : RecorderService() {
     }
 
     override fun onDestroy() {
+        if (isDestroying) return
+        isDestroying = true
+
         recorderState = RecorderState.IDLE
         audioRecorder?.stop()
         audioRecorder?.release()

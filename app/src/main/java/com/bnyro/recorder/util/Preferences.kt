@@ -50,6 +50,12 @@ object Preferences {
     const val videoBallPosYLandscapeKey = "videoBallPosYLandscape"
     const val annotationXKey = "annotationX"
     const val annotationYKey = "annotationY"
+    // 录屏前先选择要录制的屏幕区域（需要悬浮窗权限）
+    const val regionRecordingKey = "regionRecording"
+    // 音量键长按停止（需要系统无障碍服务）
+    const val volumeKeyStopKey = "volumeKeyStop"
+    const val volumeKeyStopHoldMsKey = "volumeKeyStopHoldMs"
+    const val volumeKeyStopHoldDefaultMs = 800
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREF_FILE_NAME, Context.MODE_PRIVATE)

@@ -10,9 +10,9 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.result.ActivityResult
-import androidx.annotation.RequiresApi
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -23,33 +23,86 @@ import com.bnyro.recorder.R
 import com.bnyro.recorder.canvas_overlay.CanvasOverlay
 import com.bnyro.recorder.enums.AudioSource
 import com.bnyro.recorder.enums.RecorderState
+import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.services.AudioRecorderService
 import com.bnyro.recorder.services.LosslessRecorderService
 import com.bnyro.recorder.services.RecorderService
 import com.bnyro.recorder.services.ScreenRecorderService
 import com.bnyro.recorder.util.PermissionHelper
 import com.bnyro.recorder.util.Preferences
+import com.bnyro.recorder.util.RecorderControl
+import com.bnyro.recorder.util.RecorderStatusHolder
 
+/**
+ * 录制状态的 UI 侧门面。
+ *
+ * 状态的唯一来源是 [RecorderStatusHolder]：无论录制是从应用内、悬浮球、
+ * 磁贴还是快捷方式启动的，这里都能立刻反映出来，避免出现“球已经在录、
+ * 应用界面仍显示空闲”的状态错乱。
+ */
 class RecorderModel : ViewModel() {
     private val supportsOverlay = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
 
     var recorderState by mutableStateOf(RecorderState.IDLE)
+        private set
+
+    /** 当前正在录制的类型；null 表示没有任何录制。 */
+    var activeType by mutableStateOf<RecorderType?>(null)
+        private set
+
     var recordedTime by mutableStateOf<Long?>(null)
     val recordedAmplitudes = mutableStateListOf<Int>()
     private var activityResult: ActivityResult? = null
     private var canvasOverlay: CanvasOverlay? = null
 
     private val handler = Handler(Looper.getMainLooper())
+    private var timeLoopRunning = false
+    private var amplitudeLoopRunning = false
 
     @SuppressLint("StaticFieldLeak")
     private var recorderService: RecorderService? = null
+    private var boundContext: Context? = null
+
+    /** 本次绑定是否由本模型发起（只有发起方需要调用 start） */
+    private var pendingStart = false
+
+    private val timeRunnable = object : Runnable {
+        override fun run() {
+            val active = RecorderStatusHolder.activeType
+            if (active == null) {
+                timeLoopRunning = false
+                recordedTime = null
+                return
+            }
+            // 用开始时刻计算，这样从悬浮球开始录制、之后才打开应用时，
+            // 计时不会从 0 重新数。
+            val elapsed = SystemClock.elapsedRealtime() - RecorderStatusHolder.activeSince(active)
+            recordedTime = (elapsed / 100).coerceAtLeast(0)
+            handler.postDelayed(this, 100)
+        }
+    }
+
+    private val amplitudeRunnable = object : Runnable {
+        override fun run() {
+            if (RecorderStatusHolder.activeType == null) {
+                amplitudeLoopRunning = false
+                return
+            }
+            recorderService?.getCurrentAmplitude()?.let {
+                if (recordedAmplitudes.size >= 90) recordedAmplitudes.removeAt(0)
+                recordedAmplitudes.add(it)
+            }
+            handler.postDelayed(this, 100)
+        }
+    }
+
+    private val statusListener: (RecorderType, RecorderState) -> Unit = { _, _ -> syncState() }
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(className: ComponentName, service: IBinder) {
             recorderService = (service as RecorderService.LocalBinder).getService()
-            recorderService?.onRecorderStateChanged = {
-                recorderState = it
-            }
+            val shouldStart = pendingStart
+            pendingStart = false
             activityResult?.let { result ->
                 (recorderService as? ScreenRecorderService)?.prepare(result)
                 (recorderService as? AudioRecorderService)?.prepare(result)
@@ -62,11 +115,40 @@ class RecorderModel : ViewModel() {
             if (supportsOverlay && recorderService is ScreenRecorderService) {
                 canvasOverlay?.show()
             }
-            recorderService?.start()
+            // 只有发起启动的那个模型才调用 start()：否则重复绑定同一个
+            // 服务会创建第二个 MediaRecorder
+            if (shouldStart) recorderService?.start()
         }
 
         override fun onServiceDisconnected(arg0: ComponentName) {
             recorderService = null
+        }
+    }
+
+    init {
+        RecorderStatusHolder.addListener(statusListener)
+        syncState()
+    }
+
+    override fun onCleared() {
+        RecorderStatusHolder.removeListener(statusListener)
+        handler.removeCallbacksAndMessages(null)
+        detachService()
+        super.onCleared()
+    }
+
+    private fun syncState() {
+        val active = RecorderStatusHolder.activeType
+        activeType = active
+        recorderState = if (active == null) RecorderState.IDLE else RecorderState.ACTIVE
+
+        if (active != null) {
+            startTimeLoop()
+            startAmplitudeLoop()
+        } else {
+            recordedTime = null
+            recordedAmplitudes.clear()
+            detachService()
         }
     }
 
@@ -76,11 +158,12 @@ class RecorderModel : ViewModel() {
      * 可以避免把这段动画录进视频的前几帧。
      */
     fun startVideoRecorder(context: Context, result: ActivityResult, startDelayMs: Long = 0L) {
+        if (!canStart(context)) return
         activityResult = result
         val serviceIntent = Intent(context, ScreenRecorderService::class.java).apply {
             putExtra(RecorderService.START_DELAY_EXTRA_KEY, startDelayMs)
         }
-        startRecorderService(context, serviceIntent)
+        if (!startRecorderService(context, serviceIntent)) return
         val showOverlayAnnotation =
             Preferences.prefs.getBoolean(Preferences.showOverlayAnnotationToolKey, false)
         if (supportsOverlay && showOverlayAnnotation) {
@@ -90,6 +173,7 @@ class RecorderModel : ViewModel() {
 
     @SuppressLint("NewApi")
     fun startAudioRecorder(context: Context, result: ActivityResult? = null): Boolean {
+        if (!canStart(context)) return false
         activityResult = result
 
         val audioPermission = mutableListOf(Manifest.permission.RECORD_AUDIO)
@@ -120,8 +204,7 @@ class RecorderModel : ViewModel() {
                 Intent(context, AudioRecorderService::class.java)
             }
 
-        startRecorderService(context, serviceIntent)
-        return true
+        return startRecorderService(context, serviceIntent)
     }
 
     /** 内部/混合音频需要 MediaProjection 授权 */
@@ -129,63 +212,71 @@ class RecorderModel : ViewModel() {
         Preferences.prefs.getInt(Preferences.audioSourceKey, AudioSource.MICROPHONE.value)
     ) != AudioSource.MICROPHONE
 
-    private fun startRecorderService(context: Context, intent: Intent) {
-        runCatching {
-            context.unbindService(connection)
-        }
-
-        listOfNotNull(
-            AudioRecorderService::class.java,
-            ScreenRecorderService::class.java,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) LosslessRecorderService::class.java else null
-        ).forEach {
-            runCatching {
-                context.stopService(Intent(context, it))
-            }
-        }
-        ContextCompat.startForegroundService(context, intent)
-        context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
-
-        startElapsedTimeCounter()
-        handler.postDelayed(this::updateAmplitude, 100)
+    /**
+     * 已经有任意录制在运行时不再启动新服务：旧实现在开始前会强行杀掉
+     * 三个录制服务，如果此时旧录制还在收尾（写 moov、合流），新旧实例
+     * 会同时抢占 MediaProjection / 内部音频，直接导致崩溃或 0KB 文件。
+     */
+    private fun canStart(context: Context): Boolean {
+        if (RecorderStatusHolder.activeType == null) return true
+        Toast.makeText(context, R.string.floating_ball_other_recording, Toast.LENGTH_SHORT).show()
+        return false
     }
 
-    fun stopRecording() {
-        recorderService?.onDestroy()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) canvasOverlay?.remove()
-        // Without this, the reference stays around after the view is
-        // removed - if a subsequent recording session then reconnects to
-        // `connection` (see onServiceConnected above), it would try to
-        // re-show this same, already-removed CanvasOverlay, resulting in a
-        // visible-but-broken overlay (can't be dragged, buttons don't
-        // respond) turning up in scenarios that never created one, most
-        // noticeably a plain audio recording right after a video one.
+    private fun startRecorderService(context: Context, intent: Intent): Boolean {
+        if (RecorderStatusHolder.activeType != null) return false
+
+        detachService()
+        // 绑定和解绑必须使用同一个 Context：Android 以"外层 Context"为键
+        // 登记 ServiceConnection，用 Activity 绑定却用 applicationContext
+        // 解绑会抛 "Service not registered" 并被静默忽略，绑定泄漏后服务
+        // 实例永远不会销毁，下次启动复用这个已停止的实例就再也停不下来了。
+        val appContext = context.applicationContext
+        // 清掉可能还没销毁完的旧实例；此时没有任何录制在进行，不会打断收尾
+        runCatching { appContext.stopService(intent) }
+        ContextCompat.startForegroundService(appContext, intent)
+        boundContext = appContext
+        pendingStart = true
+        if (!appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE)) {
+            pendingStart = false
+        }
+        return true
+    }
+
+    /**
+     * 停止当前正在进行的录制（无论是哪个入口启动的）。
+     * 通过广播让服务自己收尾，而不是直接调用服务的 onDestroy。
+     */
+    fun stopRecording(context: Context) {
+        RecorderControl.requestStopActive(context)
+    }
+
+    /** 录制结束、状态回到空闲后清理界面残留。 */
+    fun clearRecordingUi() {
+        if (RecorderStatusHolder.activeType != null) return
+        if (supportsOverlay) canvasOverlay?.remove()
         canvasOverlay = null
         recordedTime = null
         recordedAmplitudes.clear()
     }
 
-    private fun updateTime() {
-        if (recorderState != RecorderState.ACTIVE) return
-
-        recordedTime = recordedTime?.plus(1)
-        handler.postDelayed(this::updateTime, 100)
+    private fun startTimeLoop() {
+        if (timeLoopRunning) return
+        timeLoopRunning = true
+        handler.post(timeRunnable)
     }
 
-    private fun updateAmplitude() {
-        if (recorderState != RecorderState.ACTIVE) return
-
-        recorderService?.getCurrentAmplitude()?.let {
-            if (recordedAmplitudes.size >= 90) recordedAmplitudes.removeAt(0)
-            recordedAmplitudes.add(it)
-        }
-
-        handler.postDelayed(this::updateAmplitude, 100)
+    private fun startAmplitudeLoop() {
+        if (amplitudeLoopRunning) return
+        amplitudeLoopRunning = true
+        handler.post(amplitudeRunnable)
     }
 
-    private fun startElapsedTimeCounter() {
-        recordedTime = 0L
-        handler.postDelayed(this::updateTime, 100)
+    private fun detachService() {
+        recorderService = null
+        pendingStart = false
+        boundContext?.let { ctx -> runCatching { ctx.unbindService(connection) } }
+        boundContext = null
     }
 
     @SuppressLint("NewApi")

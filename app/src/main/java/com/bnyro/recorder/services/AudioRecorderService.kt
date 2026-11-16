@@ -58,16 +58,20 @@ class AudioRecorderService : RecorderService() {
             Log.e(TAG, "无法获取 MediaProjection", it)
         }.getOrNull()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            mediaProjection?.registerCallback(object : MediaProjection.Callback() {
-                override fun onStop() {
-                    onDestroy()
-                }
-            }, null)
-        }
+        // 全版本注册：系统侧（状态栏胶囊、锁屏、用户撤销授权）停止投屏时
+        // 需要正常收尾并保存录音
+        mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() {
+                onDestroy()
+            }
+        }, null)
     }
 
     override fun start() {
+        // 同一个服务实例只启动一次：重复的启动请求（重复绑定/重复点击）
+        // 会创建第二个 MediaRecorder，而停止时只能停掉一个。
+        if (!acquireStart()) return
+
         val audioSource = currentAudioSource()
         if (audioSource != AudioSource.MICROPHONE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             if (!startSystemAudioRecording(audioSource == AudioSource.MICROPHONE_AND_INTERNAL)) {
@@ -189,8 +193,11 @@ class AudioRecorderService : RecorderService() {
         mediaProjection = null
     }
 
-    override fun getCurrentAmplitude(): Int? =
+    // 停止录制时 UI 的振幅轮询可能比 release() 晚一拍，此时 getMaxAmplitude
+    // 会抛 IllegalStateException 直接把整个进程带崩（无障碍服务也会一起被杀）
+    override fun getCurrentAmplitude(): Int? = runCatching {
         systemAudioRecorder?.currentAmplitude ?: recorder?.maxAmplitude
+    }.getOrNull()
 
     companion object {
         private const val TAG = "AudioRecorderService"

@@ -25,7 +25,7 @@ fun RecorderView(
     LaunchedEffect(recorderModel.recorderState) {
         // update the UI when the recorder gets destroyed by the notification
         if (recorderModel.recorderState == RecorderState.IDLE) {
-            recorderModel.stopRecording()
+            recorderModel.clearRecordingUi()
             // a recording that just finished should show up in the list
             // right away, not only after the app is restarted
             playerModel.loadFiles()

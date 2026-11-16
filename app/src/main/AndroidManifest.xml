@@ -12,6 +12,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 无障碍自愈：只能由 adb 或 root 授予，用于把被系统摘掉的无障碍服务写回 -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- Opt out for network permissions that are optional for the ExoPlayer -->
     <uses-permission
@@ -72,6 +76,21 @@
         <service
             android:name=".services.VideoBallService"
             android:exported="false" />
+
+        <!-- 音量键长按停止：只过滤按键事件，不读取屏幕内容 -->
+        <service
+            android:name=".services.VolumeKeyStopService"
+            android:exported="true"
+            android:label="@string/volume_key_stop_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
 
         <receiver
             android:name=".receivers.FinishedNotificationReceiver"

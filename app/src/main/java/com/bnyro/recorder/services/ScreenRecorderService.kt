@@ -4,8 +4,10 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.media.MediaFormat
 import android.media.MediaRecorder
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -14,6 +16,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
@@ -22,11 +25,14 @@ import androidx.activity.result.ActivityResult
 import androidx.annotation.RequiresApi
 import com.bnyro.recorder.App
 import com.bnyro.recorder.R
+import com.bnyro.recorder.canvas_overlay.RegionMaskOverlay
+import com.bnyro.recorder.canvas_overlay.RegionSelectorOverlay
 import com.bnyro.recorder.enums.AudioChannels
 import com.bnyro.recorder.enums.AudioSource
 import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.enums.VideoFormat
 import com.bnyro.recorder.obj.VideoResolution
+import com.bnyro.recorder.util.CroppedVideoEncoder
 import com.bnyro.recorder.util.MediaMerger
 import com.bnyro.recorder.util.PlayerHelper
 import com.bnyro.recorder.util.Preferences
@@ -47,10 +53,17 @@ class ScreenRecorderService : RecorderService() {
     private var tempVideoFile: File? = null
     private var tempVideoDescriptor: ParcelFileDescriptor? = null
     private var tempAudioFile: File? = null
+    private var tempAudioDescriptor: ParcelFileDescriptor? = null
     private var videoStartNanos = 0L
     private var audioStartNanos = 0L
     private var isDestroying = false
     private var startDelayMs = 0L
+
+    // 区域录制：选区界面、区域外遮罩与实时裁剪编码器
+    private var regionSelectorOverlay: RegionSelectorOverlay? = null
+    private var regionMaskOverlay: RegionMaskOverlay? = null
+    private var regionEncoder: CroppedVideoEncoder? = null
+
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -98,25 +111,226 @@ class ScreenRecorderService : RecorderService() {
             return
         }
         val projection = mediaProjection ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            projection.registerCallback(object : MediaProjection.Callback() {
-                override fun onStop() {
-                    onDestroy()
-                }
-            }, null)
-        }
+        // 全版本注册：Android 15 QPR1+ 的状态栏“录制中”胶囊、锁屏自动停止
+        // 等系统侧停止都会走 onStop，需要正常收尾保存文件。
+        projection.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() {
+                onDestroy()
+            }
+        }, null)
     }
 
     override fun start() {
+        // 同一个服务实例只启动一次，避免重复启动后无法停止
+        if (!acquireStart()) return
+
         // 需要等待时先挂起真正的采集，避免把"授权弹窗关闭后回到上个应用"
         // 的过渡动画录进视频的开头
         if (startDelayMs > 0) {
             mainHandler.postDelayed({
-                if (!isDestroying) startCapture()
+                // 这几百毫秒里可能已经从球/通知栏停止过了，此时不能再开始采集，
+                // 否则会留下一段没人能停掉的录制
+                if (!isDestroying && !isShuttingDown) beginCapture()
             }, startDelayMs)
+        } else {
+            beginCapture()
+        }
+    }
+
+    /** 区域录制开启时先让用户框选区域，否则直接开始全屏采集 */
+    private fun beginCapture() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            Preferences.prefs.getBoolean(Preferences.regionRecordingKey, false)
+        ) {
+            if (!Settings.canDrawOverlays(this)) {
+                Toast.makeText(
+                    this,
+                    R.string.region_recording_permission_missing,
+                    Toast.LENGTH_LONG
+                ).show()
+                startCapture()
+            } else {
+                showRegionSelector()
+            }
         } else {
             startCapture()
         }
+    }
+
+    private fun showRegionSelector() {
+        val selector = RegionSelectorOverlay(
+            this,
+            onConfirm = { rect ->
+                regionSelectorOverlay = null
+                if (!isDestroying && !isShuttingDown) startRegionCapture(rect)
+            },
+            onCancel = {
+                regionSelectorOverlay = null
+                onDestroy()
+            }
+        )
+        regionSelectorOverlay = selector
+        if (!selector.show()) {
+            regionSelectorOverlay = null
+            Toast.makeText(
+                this,
+                R.string.region_recording_permission_missing,
+                Toast.LENGTH_LONG
+            ).show()
+            startCapture()
+        }
+    }
+
+    private fun startRegionCapture(selection: Rect) {
+        val metrics = getRealDisplayMetrics()
+        val rect = Rect(selection)
+        if (!rect.intersect(0, 0, metrics.widthPixels, metrics.heightPixels) ||
+            rect.width() < RegionSelectorOverlay.MIN_REGION_PX ||
+            rect.height() < RegionSelectorOverlay.MIN_REGION_PX
+        ) {
+            Toast.makeText(this, R.string.region_recording_failed, Toast.LENGTH_LONG).show()
+            onDestroy()
+            return
+        }
+
+        val audioSource = AudioSource.fromInt(
+            Preferences.prefs.getInt(Preferences.videoAudioSourceKey, AudioSource.MICROPHONE.value)
+        )
+        val needsSystemAudio = audioSource != AudioSource.MICROPHONE
+
+        // 编码尺寸保持选区的宽高比，同时跟随画质预设整体缩放
+        val scale = getQualityScale(metrics.widthPixels, metrics.heightPixels)
+        val outputWidth = makeEven((rect.width() * scale).toInt())
+        val outputHeight = makeEven((rect.height() * scale).toInt())
+
+        val display = (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager)
+            .getDisplay(Display.DEFAULT_DISPLAY)
+        val frameRate = display.refreshRate.toInt().coerceAtLeast(30)
+        val mimeType = if (VideoFormat.getCurrent().codec == MediaRecorder.VideoEncoder.HEVC) {
+            MediaFormat.MIMETYPE_VIDEO_HEVC
+        } else {
+            MediaFormat.MIMETYPE_VIDEO_AVC
+        }
+        val bitratePref = Preferences.prefs.getInt(Preferences.videoBitrateKey, -1)
+        val autoBitrate = (BPP * frameRate * outputWidth * outputHeight)
+            .toInt()
+            .coerceAtLeast(500_000)
+        val bitRate = bitratePref.takeIf { it > 0 } ?: autoBitrate
+
+        outputFile = (application as App).fileRepository.getOutputFile("mp4")
+        if (outputFile == null) {
+            Toast.makeText(
+                this,
+                R.string.cant_access_selected_folder,
+                Toast.LENGTH_LONG
+            ).show()
+            onDestroy()
+            return
+        }
+
+        val videoFile = File(cacheDir, "screen_region_video_${System.currentTimeMillis()}.mp4")
+        tempVideoFile = videoFile
+        val encoder = CroppedVideoEncoder(
+            screenWidth = metrics.widthPixels,
+            screenHeight = metrics.heightPixels,
+            region = rect,
+            width = outputWidth,
+            height = outputHeight,
+            mimeType = mimeType,
+            bitRate = bitRate,
+            frameRate = frameRate,
+            outputFile = videoFile
+        )
+        regionEncoder = encoder
+
+        // 话筒模式下音频单独录成 m4a，停止后再和裁剪后的视频合流
+        if (!needsSystemAudio && !runCatching { startMicrophoneAudioCapture() }.isSuccess) {
+            Log.e(TAG, "Unable to start microphone capture")
+            failRegionCapture()
+            return
+        }
+
+        val surface = runCatching { encoder.start() }.onFailure {
+            Log.e(TAG, "Unable to start the region encoder", it)
+        }.getOrNull()
+        if (surface == null) {
+            failRegionCapture()
+            return
+        }
+
+        val projection = mediaProjection
+        if (projection == null) {
+            failRegionCapture()
+            return
+        }
+        virtualDisplay = runCatching {
+            projection.createVirtualDisplay(
+                getString(R.string.app_name),
+                metrics.widthPixels,
+                metrics.heightPixels,
+                metrics.densityDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                surface,
+                null,
+                null
+            )
+        }.onFailure {
+            Log.e(TAG, "Unable to create the virtual display", it)
+        }.getOrNull()
+        if (virtualDisplay == null) {
+            failRegionCapture()
+            return
+        }
+
+        regionMaskOverlay = RegionMaskOverlay(this, rect).takeIf { it.show() }
+
+        if (needsSystemAudio && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startSystemAudioCapture(audioSource == AudioSource.MICROPHONE_AND_INTERNAL)
+        }
+
+        videoStartNanos = SystemClock.elapsedRealtimeNanos()
+        super.start()
+    }
+
+    /** 区域录制没能正常开始：不留空文件，直接走正常收尾 */
+    private fun failRegionCapture() {
+        Toast.makeText(this, R.string.region_recording_failed, Toast.LENGTH_LONG).show()
+        runCatching { outputFile?.delete() }
+        outputFile = null
+        onDestroy()
+    }
+
+    /** 话筒模式下的独立音轨，写进缓存文件，停止后与视频合流 */
+    private fun startMicrophoneAudioCapture() {
+        val audioFile = File(cacheDir, "screen_region_audio_${System.currentTimeMillis()}.m4a")
+        tempAudioFile = audioFile
+        val descriptor = ParcelFileDescriptor.open(
+            audioFile,
+            ParcelFileDescriptor.MODE_READ_WRITE or
+                ParcelFileDescriptor.MODE_CREATE or
+                ParcelFileDescriptor.MODE_TRUNCATE
+        )
+        tempAudioDescriptor = descriptor
+
+        recorder = PlayerHelper.newRecorder(this).apply {
+            setAudioSource(MediaRecorder.AudioSource.DEFAULT)
+            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+
+            Preferences.prefs.getInt(Preferences.videoAudioSampleRateKey, -1).takeIf { it > 0 }
+                ?.let { setAudioSamplingRate(it) }
+            Preferences.prefs.getInt(Preferences.videoAudioBitrateKey, -1).takeIf { it > 0 }
+                ?.let { setAudioEncodingBitRate(it) }
+            Preferences.prefs.getInt(
+                Preferences.videoAudioChannelsKey,
+                AudioChannels.MONO.value
+            ).let { setAudioChannels(it) }
+
+            setOutputFile(descriptor.fileDescriptor)
+            prepare()
+            start()
+        }
+        audioStartNanos = SystemClock.elapsedRealtimeNanos()
     }
 
     private fun startCapture() {
@@ -259,6 +473,16 @@ class ScreenRecorderService : RecorderService() {
     }
 
     override suspend fun onRecordingStopped() {
+        // 区域录制：先停止裁剪编码器，把最后几帧和 moov 写完再合流
+        val encoder = regionEncoder
+        regionEncoder = null
+        if (encoder != null) {
+            runCatching { encoder.stop() }
+            encoder.firstFrameNanos?.let { videoStartNanos = it }
+        }
+        runCatching { tempAudioDescriptor?.close() }
+        tempAudioDescriptor = null
+
         val videoFile = tempVideoFile ?: return
         runCatching { tempVideoDescriptor?.close() }
         tempVideoDescriptor = null
@@ -313,12 +537,9 @@ class ScreenRecorderService : RecorderService() {
     }
 
     private fun getScreenResolution(): VideoResolution {
-        val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-        val display = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
-
-        // TODO Use the window API instead on newer devices
-        val metrics = DisplayMetrics()
-        display.getRealMetrics(metrics)
+        val display = (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager)
+            .getDisplay(Display.DEFAULT_DISPLAY)
+        val metrics = getRealDisplayMetrics()
 
         val (width, height) = scaleToQualityPreset(metrics.widthPixels, metrics.heightPixels)
 
@@ -329,6 +550,25 @@ class ScreenRecorderService : RecorderService() {
             display.refreshRate.toInt()
         )
     }
+
+    private fun getRealDisplayMetrics(): DisplayMetrics {
+        val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        val display = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
+        // TODO Use the window API instead on newer devices
+        return DisplayMetrics().also { display.getRealMetrics(it) }
+    }
+
+    /** 画质预设在物理分辨率上的整体缩放比例，区域录制沿用同一比例 */
+    private fun getQualityScale(width: Int, height: Int): Float {
+        val targetShortEdge = Preferences.prefs.getInt(Preferences.videoResolutionKey, 0)
+        if (targetShortEdge <= 0) return 1f
+        val shortEdge = minOf(width, height)
+        if (shortEdge <= targetShortEdge) return 1f
+        return targetShortEdge.toFloat() / shortEdge
+    }
+
+    /** H.264/H.265 编码器要求宽高为偶数 */
+    private fun makeEven(value: Int): Int = (value / 2 * 2).coerceAtLeast(2)
 
     /**
      * Scales the screen's native resolution down to the selected quality preset
@@ -366,6 +606,12 @@ class ScreenRecorderService : RecorderService() {
         // 临时视频文件的 fd 必须等 MediaRecorder 停止后再关闭（在
         // onRecordingStopped 里处理），否则 moov 无法正常写入。
 
+        // 选区界面和区域外遮罩不属于录制内容，结束时要立刻消失
+        regionSelectorOverlay?.remove()
+        regionSelectorOverlay = null
+        regionMaskOverlay?.remove()
+        regionMaskOverlay = null
+
         super.onDestroy()
         virtualDisplay?.release()
         // Without this, the MediaProjection session (and the persistent
@@ -378,8 +624,11 @@ class ScreenRecorderService : RecorderService() {
         mediaProjection = null
     }
 
-    override fun getCurrentAmplitude(): Int? =
+    // 停止录制时 UI 的振幅轮询可能比 release() 晚一拍，此时 getMaxAmplitude
+    // 会抛 IllegalStateException 直接把整个进程带崩
+    override fun getCurrentAmplitude(): Int? = runCatching {
         systemAudioRecorder?.currentAmplitude ?: recorder?.maxAmplitude
+    }.getOrNull()
 
     companion object {
         private const val TAG = "ScreenRecorderService"

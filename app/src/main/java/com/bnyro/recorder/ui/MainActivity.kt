@@ -7,6 +7,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -19,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.rememberNavController
+import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.enums.ThemeMode
 import com.bnyro.recorder.services.AudioBallService
@@ -27,6 +29,7 @@ import com.bnyro.recorder.ui.models.RecorderModel
 import com.bnyro.recorder.ui.models.ThemeModel
 import com.bnyro.recorder.ui.theme.RecordYouTheme
 import com.bnyro.recorder.util.FloatingBallHelper
+import com.bnyro.recorder.util.RecorderStatusHolder
 
 class MainActivity : ComponentActivity() {
     private var initialRecorder = RecorderType.NONE
@@ -124,6 +127,15 @@ class MainActivity : ComponentActivity() {
         val initialRecorderType = intent.getStringExtra(EXTRA_ACTION_KEY)?.let {
             RecorderType.valueOf(it)
         } ?: RecorderType.NONE
+
+        // 已有录制在跑时不再启动第二个，否则会和正在收尾的旧服务抢占资源，
+        // 造成 0KB 文件 / 崩溃 / 无法停止
+        if (initialRecorderType != RecorderType.NONE && RecorderStatusHolder.activeType != null) {
+            Toast.makeText(this, R.string.floating_ball_other_recording, Toast.LENGTH_SHORT).show()
+            intent.removeExtra(EXTRA_ACTION_KEY)
+            return
+        }
+
         initialRecorder = initialRecorderType
         launchedFromShortcut = initialRecorderType != RecorderType.NONE
         if (initialRecorderType == RecorderType.AUDIO) {

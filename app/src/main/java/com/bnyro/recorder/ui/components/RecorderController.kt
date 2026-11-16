@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.media.projection.MediaProjectionManager
 import android.text.format.DateUtils
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,7 +39,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bnyro.recorder.R
-import com.bnyro.recorder.enums.RecorderState
+import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.ui.models.RecorderModel
 
 @Composable
@@ -49,6 +50,12 @@ fun RecorderController(
     val context = LocalContext.current
     val mProjectionManager =
         context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+
+    // 状态唯一来源：无论录制是从应用内还是悬浮球/磁贴启动的，都能正确显示
+    val activeType = recorderModel.activeType
+    val thisType = if (recordScreenMode) RecorderType.VIDEO else RecorderType.AUDIO
+    val isThisTypeActive = activeType == thisType
+    val isOtherTypeActive = activeType != null && !isThisTypeActive
 
     val requestRecording = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -82,12 +89,14 @@ fun RecorderController(
         modifier = Modifier.wrapContentSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        recorderModel.recordedTime?.let {
-            Text(
-                text = DateUtils.formatElapsedTime(it / 10),
-                style = MaterialTheme.typography.displayLarge
-            )
-            Spacer(modifier = Modifier.height(20.dp))
+        if (isThisTypeActive) {
+            recorderModel.recordedTime?.let {
+                Text(
+                    text = DateUtils.formatElapsedTime(it / 10),
+                    style = MaterialTheme.typography.displayLarge
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+            }
         }
 
         Row(
@@ -107,7 +116,7 @@ fun RecorderController(
                 shape = CircleShape
             ) {
                 val buttonDescription = stringResource(
-                    if (recorderModel.recorderState != RecorderState.IDLE) {
+                    if (isThisTypeActive) {
                         R.string.stop
                     } else {
                         R.string.record
@@ -116,7 +125,13 @@ fun RecorderController(
                 IconButton(
                     onClick = {
                         when {
-                            recorderModel.recorderState != RecorderState.IDLE -> recorderModel.stopRecording()
+                            isThisTypeActive -> recorderModel.stopRecording(context)
+                            isOtherTypeActive -> Toast.makeText(
+                                context,
+                                R.string.floating_ball_other_recording,
+                                Toast.LENGTH_SHORT
+                            ).show()
+
                             recordScreenMode -> requestScreenRecording()
                             recorderModel.audioRequiresScreenCapture() -> requestAudioWithInternalAudio()
                             else -> recorderModel.startAudioRecorder(context)
@@ -127,7 +142,7 @@ fun RecorderController(
                         .semantics { contentDescription = buttonDescription }
                 ) {
                     when {
-                        recorderModel.recorderState != RecorderState.IDLE -> {
+                        isThisTypeActive -> {
                             Icon(
                                 Icons.Default.Stop,
                                 modifier = Modifier.size(36.dp),

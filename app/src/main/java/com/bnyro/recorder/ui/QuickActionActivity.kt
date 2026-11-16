@@ -5,12 +5,16 @@ import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.ui.models.RecorderModel
+import com.bnyro.recorder.util.RecorderStatusHolder
+import com.bnyro.recorder.util.VolumeKeyStopHelper
 
 /**
  * 悬浮球、桌面快捷方式和快捷设置磁贴的“隐形”入口。
@@ -63,6 +67,20 @@ class QuickActionActivity : ComponentActivity() {
             runCatching { RecorderType.valueOf(it) }.getOrNull()
         } ?: RecorderType.NONE
 
+        // 已有录制在进行时不再启动第二个：旧逻辑会先杀掉正在收尾的服务，
+        // 结果就是文件损坏 / 崩溃 / 停不下来。
+        if (type != RecorderType.NONE && RecorderStatusHolder.activeType != null) {
+            Toast.makeText(this, R.string.floating_ball_other_recording, Toast.LENGTH_SHORT).show()
+            moveTaskToBack(true)
+            return
+        }
+
+        // 这个入口不会显示首页，用户看不到那里的警告条；
+        // 无障碍已经被系统关掉时至少提示一次，别让人以为长按还能停。
+        if (type != RecorderType.NONE && VolumeKeyStopHelper.needsAttention(this)) {
+            notifyVolumeKeyBroken()
+        }
+
         when (type) {
             RecorderType.AUDIO -> {
                 if (recorderModel.audioRequiresScreenCapture()) {
@@ -92,6 +110,27 @@ class QuickActionActivity : ComponentActivity() {
 
             RecorderType.NONE -> moveTaskToBack(true)
         }
+    }
+
+    /**
+     * 尝试把被系统摘掉的无障碍服务写回，仍然失败就 Toast 提醒。
+     * 这里不拦截录制，只是让用户知道长按音量键当前不可用。
+     */
+    private fun notifyVolumeKeyBroken() {
+        Thread {
+            val healed = runCatching {
+                VolumeKeyStopHelper.selfHeal(this) ||
+                    VolumeKeyStopHelper.selfHealWithRoot(this)
+            }.getOrDefault(false)
+            if (healed && !VolumeKeyStopHelper.needsAttention(this)) return@Thread
+            runOnUiThread {
+                Toast.makeText(
+                    applicationContext,
+                    R.string.volume_key_stop_broken_toast,
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }.start()
     }
 
     /**

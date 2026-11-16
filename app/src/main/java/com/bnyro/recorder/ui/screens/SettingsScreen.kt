@@ -1,10 +1,14 @@
 package com.bnyro.recorder.ui.screens
 
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.view.SoundEffectConstants
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,11 +22,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -30,6 +36,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,12 +44,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.AudioChannels
@@ -56,9 +66,11 @@ import com.bnyro.recorder.ui.common.CustomNumInputPref
 import com.bnyro.recorder.ui.common.SelectionDialog
 import com.bnyro.recorder.ui.components.NamingPatternPref
 import com.bnyro.recorder.ui.dialogs.AboutDialog
+import com.bnyro.recorder.ui.dialogs.AutoHealDialog
 import com.bnyro.recorder.ui.models.ThemeModel
 import com.bnyro.recorder.util.PickFolderContract
 import com.bnyro.recorder.util.Preferences
+import com.bnyro.recorder.util.VolumeKeyStopHelper
 import kotlin.math.roundToInt
 
 private const val BITRATE_PRESET_LOW = 1_500_000
@@ -132,6 +144,50 @@ fun SettingsScreen() {
     }
 
     val context = LocalContext.current
+
+    // 无障碍服务需要用户去系统设置里手动开启，开关状态本身不代表服务已生效
+    var accessibilityEnabled by remember {
+        mutableStateOf(VolumeKeyStopHelper.isReady(context))
+    }
+    var adbGranted by remember {
+        mutableStateOf(VolumeKeyStopHelper.canWriteSecureSettings(context))
+    }
+    var showAutoHeal by remember { mutableStateOf(false) }
+    var volumeKeyStopEnabled by remember {
+        mutableStateOf(Preferences.prefs.getBoolean(Preferences.volumeKeyStopKey, false))
+    }
+    var volumeKeyHoldMs by remember {
+        mutableStateOf(
+            Preferences.prefs.getInt(
+                Preferences.volumeKeyStopHoldMsKey,
+                Preferences.volumeKeyStopHoldDefaultMs
+            )
+        )
+    }
+    // 区域录制的选区界面需要“显示在其他应用上层”权限
+    var overlayPermissionGranted by remember {
+        mutableStateOf(
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.O || Settings.canDrawOverlays(context)
+        )
+    }
+    var regionRecordingEnabled by remember {
+        mutableStateOf(Preferences.prefs.getBoolean(Preferences.regionRecordingKey, false))
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    // 从系统无障碍 / 悬浮窗设置回来后重新检查，避免界面状态和实际是否开启对不上
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                accessibilityEnabled = VolumeKeyStopHelper.isReady(context)
+                adbGranted = VolumeKeyStopHelper.canWriteSecureSettings(context)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    overlayPermissionGranted = Settings.canDrawOverlays(context)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val directoryPicker = rememberLauncherForActivityResult(PickFolderContract()) {
         it ?: return@rememberLauncherForActivityResult
@@ -500,6 +556,86 @@ fun SettingsScreen() {
             }
 
             SectionDivider()
+            SectionTitle(stringResource(R.string.section_quick_actions))
+            Spacer(modifier = Modifier.height(5.dp))
+            CheckboxPref(
+                prefKey = Preferences.volumeKeyStopKey,
+                title = stringResource(R.string.volume_key_stop),
+                summary = stringResource(R.string.volume_key_stop_desc),
+                onCheckedChange = { checked ->
+                    volumeKeyStopEnabled = checked
+                    // 打开开关时如果服务还没开，先尝试静默写回（有 WRITE_SECURE_SETTINGS
+                    // 时可行），否则再带用户去系统设置
+                    if (checked && !accessibilityEnabled) {
+                        if (VolumeKeyStopHelper.selfHeal(context)) {
+                            accessibilityEnabled = true
+                        } else {
+                            VolumeKeyStopHelper.openAccessibilitySettings(context)
+                        }
+                    }
+                }
+            )
+            if (volumeKeyStopEnabled) {
+                Spacer(modifier = Modifier.height(5.dp))
+                Text(
+                    text = stringResource(
+                        if (accessibilityEnabled) {
+                            R.string.volume_key_stop_permission_granted
+                        } else {
+                            R.string.volume_key_stop_permission_missing
+                        }
+                    ),
+                    fontSize = 12.sp,
+                    color = if (accessibilityEnabled) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    }
+                )
+                Spacer(modifier = Modifier.height(5.dp))
+                AutoHealPref(
+                    granted = adbGranted,
+                    onClick = { showAutoHeal = true }
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                HoldDurationPref(
+                    holdMs = volumeKeyHoldMs,
+                    onValueChange = { volumeKeyHoldMs = it },
+                    onValueChangeFinished = {
+                        Preferences.edit {
+                            putInt(Preferences.volumeKeyStopHoldMsKey, volumeKeyHoldMs)
+                        }
+                    }
+                )
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Spacer(modifier = Modifier.height(10.dp))
+                CheckboxPref(
+                    prefKey = Preferences.regionRecordingKey,
+                    title = stringResource(R.string.region_recording),
+                    summary = stringResource(R.string.region_recording_desc),
+                    onCheckedChange = { checked ->
+                        regionRecordingEnabled = checked
+                        if (checked && !overlayPermissionGranted) {
+                            openOverlaySettings(context)
+                        }
+                    }
+                )
+                if (regionRecordingEnabled && !overlayPermissionGranted) {
+                    Spacer(modifier = Modifier.height(5.dp))
+                    Text(
+                        text = stringResource(R.string.region_recording_permission_missing),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(modifier = Modifier.height(5.dp))
+                    Button(onClick = { openOverlaySettings(context) }) {
+                        Text(stringResource(R.string.open_overlay_settings))
+                    }
+                }
+            }
+
+            SectionDivider()
             SectionTitle(stringResource(R.string.section_other))
             Spacer(modifier = Modifier.height(5.dp))
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -548,6 +684,19 @@ fun SettingsScreen() {
             showAbout = false
         }
     }
+
+    if (showAutoHeal) {
+        AutoHealDialog(
+            onDismiss = {
+                showAutoHeal = false
+                adbGranted = VolumeKeyStopHelper.canWriteSecureSettings(context)
+                accessibilityEnabled = VolumeKeyStopHelper.isReady(context)
+            },
+            onOpenAccessibilitySettings = {
+                VolumeKeyStopHelper.openAccessibilitySettings(context)
+            }
+        )
+    }
 }
 
 @Composable
@@ -557,6 +706,41 @@ private fun SectionTitle(text: String) {
         fontWeight = FontWeight.Bold,
         fontSize = 22.sp
     )
+}
+
+/**
+ * 无障碍自动恢复的入口。做成可点击的整行而不是 Checkbox，
+ * 避免和上面的开关混淆；右侧箭头表示会打开配置弹窗。
+ */
+@Composable
+private fun AutoHealPref(granted: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = stringResource(R.string.auto_heal_title), fontSize = 14.sp)
+            Text(
+                text = stringResource(
+                    if (granted) {
+                        R.string.auto_heal_summary_granted
+                    } else {
+                        R.string.auto_heal_summary_missing
+                    }
+                ),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Icon(
+            imageVector = Icons.Default.ChevronRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
 
 @Composable
@@ -629,6 +813,47 @@ private fun MixRatioPref(
             text = stringResource(R.string.audio_mix_ratio_unavailable),
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/**
+ * 音量键长按时长，以 100 毫秒为一档，范围 300–2000 毫秒。
+ */
+@Composable
+private fun HoldDurationPref(
+    holdMs: Int,
+    onValueChange: (Int) -> Unit,
+    onValueChangeFinished: () -> Unit
+) {
+    Text(
+        text = stringResource(R.string.volume_key_stop_hold),
+        fontWeight = FontWeight.Bold,
+        fontSize = 18.sp
+    )
+    Spacer(modifier = Modifier.height(2.dp))
+    Text(
+        text = stringResource(R.string.volume_key_stop_hold_value, holdMs),
+        fontSize = 13.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Slider(
+        value = holdMs.toFloat(),
+        onValueChange = { onValueChange(it.roundToInt()) },
+        onValueChangeFinished = onValueChangeFinished,
+        valueRange = 300f..2000f,
+        steps = 16
+    )
+}
+
+private fun openOverlaySettings(context: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+    runCatching {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:${context.packageName}")
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
     }
 }
