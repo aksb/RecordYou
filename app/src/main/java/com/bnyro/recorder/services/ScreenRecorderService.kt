@@ -25,6 +25,7 @@ import androidx.activity.result.ActivityResult
 import androidx.annotation.RequiresApi
 import com.bnyro.recorder.App
 import com.bnyro.recorder.R
+import com.bnyro.recorder.canvas_overlay.OverlayCoordinator
 import com.bnyro.recorder.canvas_overlay.RegionMaskOverlay
 import com.bnyro.recorder.canvas_overlay.RegionSelectorOverlay
 import com.bnyro.recorder.enums.AudioChannels
@@ -158,26 +159,80 @@ class ScreenRecorderService : RecorderService() {
     }
 
     private fun showRegionSelector() {
+        val metrics = getRealDisplayMetrics()
         val selector = RegionSelectorOverlay(
             this,
+            initialRegion = loadSavedRegion(metrics),
+            screenWidth = metrics.widthPixels,
+            screenHeight = metrics.heightPixels,
             onConfirm = { rect ->
                 regionSelectorOverlay = null
-                if (!isDestroying && !isShuttingDown) startRegionCapture(rect)
+                setSelectingRegion(false)
+                if (!isDestroying && !isShuttingDown) {
+                    // 选区总是记住：确认成功才写入，取消保持上一次
+                    // 用确认时的屏幕尺寸换算，否则旋转过之后存进去的比例是错的
+                    saveRegion(rect, getRealDisplayMetrics())
+                    startRegionCapture(rect)
+                }
             },
             onCancel = {
                 regionSelectorOverlay = null
+                setSelectingRegion(false)
+                // 选区阶段从未进入 ACTIVE，状态监听不会回调，注释层要显式收尾
+                OverlayCoordinator.notifyCancelled()
                 onDestroy()
             }
         )
         regionSelectorOverlay = selector
         if (!selector.show()) {
             regionSelectorOverlay = null
+            setSelectingRegion(false)
             Toast.makeText(
                 this,
                 R.string.region_recording_permission_missing,
                 Toast.LENGTH_LONG
             ).show()
             startCapture()
+        } else {
+            setSelectingRegion(true)
+        }
+    }
+
+    /** 读取上次确认的选区（按真实屏幕宽高的千分比保存），非法时返回 null */
+    private fun loadSavedRegion(metrics: DisplayMetrics): Rect? {
+        if (!Preferences.prefs.contains(Preferences.regionLeftKey)) return null
+        fun value(key: String) = Preferences.prefs.getInt(key, -1).coerceIn(0, 1000)
+
+        val left = value(Preferences.regionLeftKey)
+        val top = value(Preferences.regionTopKey)
+        val right = value(Preferences.regionRightKey)
+        val bottom = value(Preferences.regionBottomKey)
+        if (right <= left || bottom <= top) return null
+
+        val rect = Rect(
+            left * metrics.widthPixels / 1000,
+            top * metrics.heightPixels / 1000,
+            right * metrics.widthPixels / 1000,
+            bottom * metrics.heightPixels / 1000
+        )
+        if (rect.width() < RegionSelectorOverlay.MIN_REGION_PX ||
+            rect.height() < RegionSelectorOverlay.MIN_REGION_PX
+        ) {
+            return null
+        }
+        return rect
+    }
+
+    private fun saveRegion(rect: Rect, metrics: DisplayMetrics) {
+        if (metrics.widthPixels <= 0 || metrics.heightPixels <= 0) return
+        fun permille(value: Int, total: Int) =
+            (value.toLong() * 1000 / total).toInt().coerceIn(0, 1000)
+
+        Preferences.edit {
+            putInt(Preferences.regionLeftKey, permille(rect.left, metrics.widthPixels))
+            putInt(Preferences.regionTopKey, permille(rect.top, metrics.heightPixels))
+            putInt(Preferences.regionRightKey, permille(rect.right, metrics.widthPixels))
+            putInt(Preferences.regionBottomKey, permille(rect.bottom, metrics.heightPixels))
         }
     }
 
@@ -607,6 +662,7 @@ class ScreenRecorderService : RecorderService() {
         // onRecordingStopped 里处理），否则 moov 无法正常写入。
 
         // 选区界面和区域外遮罩不属于录制内容，结束时要立刻消失
+        setSelectingRegion(false)
         regionSelectorOverlay?.remove()
         regionSelectorOverlay = null
         regionMaskOverlay?.remove()
@@ -633,5 +689,17 @@ class ScreenRecorderService : RecorderService() {
     companion object {
         private const val TAG = "ScreenRecorderService"
         private const val BPP = 0.25f
+
+        /**
+         * 是否正停在选区域界面：此时录制状态还是 IDLE，点悬浮球会再次申请
+         * MediaProjection，和已持有的会话冲突并把应用卡死，所以要拦掉。
+         */
+        @Volatile
+        var isSelectingRegion = false
+            private set
+
+        fun setSelectingRegion(selecting: Boolean) {
+            isSelectingRegion = selecting
+        }
     }
 }

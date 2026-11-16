@@ -1,6 +1,7 @@
 package com.bnyro.recorder.services
 
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Configuration
@@ -23,6 +24,7 @@ import androidx.annotation.RequiresApi
 import androidx.annotation.StringRes
 import androidx.core.content.ContextCompat
 import com.bnyro.recorder.R
+import com.bnyro.recorder.canvas_overlay.OverlayCoordinator
 import com.bnyro.recorder.enums.RecorderState
 import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.ui.MainActivity
@@ -107,6 +109,9 @@ abstract class FloatingBallService : Service() {
             if (key == Preferences.hideBallInRecordingsKey) mainHandler.post { updateSecureFlag() }
         }
 
+    // 选区/区域遮罩是全屏悬浮窗，后添加的会盖住球，遮罩出现时重新入栈
+    private val overlayRaiser: (Boolean) -> Unit = { raiseBall() }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -117,6 +122,7 @@ abstract class FloatingBallService : Service() {
         // if a recording was already running before the ball was turned on.
         RecorderStatusHolder.addListener(stateListener)
         Preferences.prefs.registerOnSharedPreferenceChangeListener(secureFlagListener)
+        OverlayCoordinator.register(priority = 1, overlayRaiser)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -126,10 +132,21 @@ abstract class FloatingBallService : Service() {
     override fun onDestroy() {
         RecorderStatusHolder.removeListener(stateListener)
         Preferences.prefs.unregisterOnSharedPreferenceChangeListener(secureFlagListener)
+        OverlayCoordinator.unregister(overlayRaiser)
         mainHandler.removeCallbacksAndMessages(null)
         ballView?.let { runCatching { windowManager.removeView(it) } }
         ballView = null
         super.onDestroy()
+    }
+
+    /** 用同一份 LayoutParams 重新添加，使球回到悬浮窗栈顶 */
+    private fun raiseBall() {
+        val ball = ballView ?: return
+        val params = ballParams ?: return
+        runCatching {
+            windowManager.removeViewImmediate(ball)
+            windowManager.addView(ball, params)
+        }
     }
 
     private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
@@ -269,6 +286,12 @@ abstract class FloatingBallService : Service() {
 
     private fun onBallTapped() {
         ballView?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        // 选区界面还没确认时录制状态仍是 IDLE，这时再走一遍启动流程会
+        // 重复申请 MediaProjection，和服务端已持有的会话冲突导致卡死
+        if (ScreenRecorderService.isSelectingRegion) {
+            Toast.makeText(this, R.string.region_recording_selecting, Toast.LENGTH_SHORT).show()
+            return
+        }
         val otherType = if (recorderType == RecorderType.AUDIO) RecorderType.VIDEO else RecorderType.AUDIO
         when {
             RecorderStatusHolder.stateOf(recorderType) == RecorderState.ACTIVE -> stopRecording()

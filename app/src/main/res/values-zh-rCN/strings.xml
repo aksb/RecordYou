@@ -98,6 +98,7 @@
     <string name="trim_failed">剪辑失败</string>
     <string name="draw_mode">绘图模式</string>
     <string name="erase_mode">擦除模式</string>
+    <string name="annotation_clear">清除涂鸦</string>
     <string name="modified">修改日期</string>
     <string name="modified_rev">修改日期（倒序）</string>
     <string name="internal_audio">内部音频（Root）</string>
@@ -165,9 +166,12 @@
     <string name="region_recording_desc">开始录屏前拖动选择要录制的屏幕区域。选区以外会显示半透明遮罩，且不会出现在视频里。</string>
     <string name="region_recording_permission_missing">未授予“显示在其他应用上层”权限，无法显示选区界面。</string>
     <string name="region_recording_failed">无法开始区域录制</string>
-    <string name="region_recording_hint">拖动选择要录制的区域</string>
+    <string name="region_recording_hint">拖动四角或边框缩放，按住选区内部拖动</string>
+    <string name="region_recording_bar_drag_hint">长按可以拖动</string>
+    <string name="region_recording_default">默认</string>
     <string name="region_recording_full_screen">全屏</string>
-    <string name="region_recording_start">开始录制</string>
+    <string name="region_recording_start">录制</string>
+    <string name="region_recording_selecting">请先完成区域选择</string>
     <string name="open_overlay_settings">打开悬浮窗权限设置</string>
     <string name="audio_bitrate">音频比特率</string>
     <string name="video_bitrate">视频比特率</string>

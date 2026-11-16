@@ -107,6 +107,7 @@
     <string name="cant_access_selected_folder">Can\'t access selected folder!</string>
     <string name="draw_mode">Draw Mode</string>
     <string name="erase_mode">Erase Mode</string>
+    <string name="annotation_clear">Clear drawing</string>
     <string name="internal_audio">Internal Audio (Root)</string>
     <string name="internal_audio_playback">Internal audio</string>
     <string name="internal_audio_failed">Unable to capture internal audio</string>
@@ -175,9 +176,12 @@
     <string name="region_recording_desc">Before recording starts, drag to choose the screen area to capture. Everything outside it is dimmed and never appears in the video.</string>
     <string name="region_recording_permission_missing">The display-over-other-apps permission is off, so the area picker cannot be shown.</string>
     <string name="region_recording_failed">Unable to start the area recording</string>
-    <string name="region_recording_hint">Drag to select the area to record</string>
+    <string name="region_recording_hint">Drag a corner or edge to resize, drag inside to move</string>
+    <string name="region_recording_bar_drag_hint">Long press to move</string>
+    <string name="region_recording_default">Default</string>
     <string name="region_recording_full_screen">Full screen</string>
     <string name="region_recording_start">Record</string>
+    <string name="region_recording_selecting">Finish choosing the area first</string>
     <string name="open_overlay_settings">Open overlay permission settings</string>
     <string name="audio_bitrate">Audio bitrate</string>
     <string name="video_bitrate">Video bitrate</string>

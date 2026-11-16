@@ -52,6 +52,11 @@ object Preferences {
     const val annotationYKey = "annotationY"
     // 录屏前先选择要录制的屏幕区域（需要悬浮窗权限）
     const val regionRecordingKey = "regionRecording"
+    // 上次确认的区域录制选区，按真实屏幕宽高的千分比保存（0..1000）
+    const val regionLeftKey = "regionLeft"
+    const val regionTopKey = "regionTop"
+    const val regionRightKey = "regionRight"
+    const val regionBottomKey = "regionBottom"
     // 音量键长按停止（需要系统无障碍服务）
     const val volumeKeyStopKey = "volumeKeyStop"
     const val volumeKeyStopHoldMsKey = "volumeKeyStopHoldMs"
