@@ -49,10 +49,18 @@ object VolumeKeyStopHelper {
     fun isReady(context: Context): Boolean = isDeclared(context) || isBound(context)
 
     /**
-     * 开关打开、但服务确实已经不在了。只判断“明确失效”的情况，
-     * 避免服务正在绑定时的短暂空窗触发误报。
+     * 用户已经声明启用了 LSPosed 模块。模块在息屏和无障碍不可用时都会接管，
+     * 因此这种情况下无障碍服务不是必需项，也不应该提示用户去开启。
      */
-    fun needsAttention(context: Context): Boolean = isWanted() && !isReady(context)
+    fun isXposedDeclared(): Boolean =
+        Preferences.prefs.getBoolean(Preferences.volumeKeyStopXposedKey, false)
+
+    /**
+     * 开关打开、但两种实现都不可用。LSPosed 模块由用户自己声明启用，
+     * 已声明时不再因为无障碍服务缺失而提示。
+     */
+    fun needsAttention(context: Context): Boolean =
+        isWanted() && !isXposedDeclared() && !isReady(context)
 
     fun canWriteSecureSettings(context: Context): Boolean =
         context.packageManager.checkPermission(

@@ -59,6 +59,9 @@ object Preferences {
     const val regionBottomKey = "regionBottom"
     // 音量键长按停止（需要系统无障碍服务）
     const val volumeKeyStopKey = "volumeKeyStop"
+    // 用户声明已启用 LSPosed 模块：亮屏/息屏都由 system_server 侧接管，
+    // 此时不再要求开启无障碍服务，也不再显示无障碍相关提示
+    const val volumeKeyStopXposedKey = "volumeKeyStopXposed"
     const val volumeKeyStopHoldMsKey = "volumeKeyStopHoldMs"
     const val volumeKeyStopHoldDefaultMs = 800
 

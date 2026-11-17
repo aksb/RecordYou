@@ -134,14 +134,17 @@
     <string name="volume_key_stop_service_desc">Stops a running RecordYou recording when a volume key is held down. Key events are only used for this, no screen content is read.</string>
     <string name="volume_key_stop_permission_missing">The accessibility service is off, so holding a volume key does nothing yet.</string>
     <string name="volume_key_stop_permission_granted">The accessibility service is on.</string>
+    <string name="volume_key_stop_xposed">I have installed and enabled the LSPosed module</string>
+    <string name="volume_key_stop_xposed_desc">Select “System Framework” in LSPosed. Once checked, the accessibility service is no longer required, and holding a volume key works with the screen on or off.</string>
+    <string name="volume_key_stop_xposed_active">Handled by the LSPosed module, works with the screen on or off.</string>
     <string name="open_accessibility_settings">Open accessibility settings</string>
     <string name="volume_key_stop_toast">Recording stopped</string>
     <string name="volume_key_stop_broken_title">Volume key stop is inactive</string>
-    <string name="volume_key_stop_broken_desc">The accessibility service was turned off by the system (common after clearing recent tasks). Holding a volume key will not stop a recording.</string>
+    <string name="volume_key_stop_broken_desc">The accessibility service was turned off by the system and the LSPosed module is not enabled. Holding a volume key will not stop a recording.</string>
     <string name="volume_key_stop_backup_notification">You can still stop a recording with the Stop button in the notification.</string>
     <string name="volume_key_stop_backup_both">You can still stop a recording with the floating ball or the Stop button in the notification.</string>
     <string name="volume_key_stop_healed">Accessibility service restored</string>
-    <string name="volume_key_stop_broken_toast">Volume key stop is inactive: the accessibility service was turned off</string>
+    <string name="volume_key_stop_broken_toast">Volume key stop is inactive: the accessibility service is off and the LSPosed module is not enabled</string>
     <string name="volume_key_stop_dialog_ignore">Got it</string>
     <string name="volume_key_stop_view_fix">View fix</string>
     <!-- Accessibility auto-restore -->

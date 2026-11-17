@@ -18,6 +18,7 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XC_MethodHook.MethodHookParam
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import de.robv.android.xposed.callbacks.XCallback
 
 /**
  * 息屏长按音量键停止录制（system_server 侧）。
@@ -27,8 +28,13 @@ import de.robv.android.xposed.XposedHelpers
  * 调节，所以音量值和音量条都不会被这次长按改变。
  *
  * 亮屏时不拦截（交给 App 里的无障碍服务），但无障碍服务不可用时两种状态都接管。
+ *
+ * 用最高优先级注册：另一个常见模块（长按音量键切歌等）hook 的是同一个方法，
+ * Xposed 的 before hook 按优先级从高到低执行、遇到 setResult 就终止后续 hook。
+ * 录制期间必须由我们先吞掉按键，否则可能被对方抢走导致停止录制失效，
+ * 或者两边同时触发。不录制时我们不做任何拦截，不影响其它模块。
  */
-object VolumeKeyHook : XC_MethodHook() {
+object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
     const val ACTION_STOP = "com.bnyro.recorder.action.XPOSED_VOLUME_KEY_STOP"
 
     private const val ACTION_STATE = "com.bnyro.recorder.action.XPOSED_VOLUME_KEY_STATE"

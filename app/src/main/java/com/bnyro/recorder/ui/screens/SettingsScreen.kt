@@ -164,6 +164,10 @@ fun SettingsScreen() {
             )
         )
     }
+    // 用户声明已启用 LSPosed 模块后，亮屏/息屏都由模块接管，不再要求无障碍服务
+    var volumeKeyUseXposed by remember {
+        mutableStateOf(VolumeKeyStopHelper.isXposedDeclared())
+    }
     // 区域录制的选区界面需要“显示在其他应用上层”权限
     var overlayPermissionGranted by remember {
         mutableStateOf(
@@ -421,6 +425,33 @@ fun SettingsScreen() {
             Spacer(modifier = Modifier.height(15.dp))
             SubSectionTitle(stringResource(R.string.section_video))
             Spacer(modifier = Modifier.height(5.dp))
+            // 区域录制决定的是采集范围，属于画面设置，放在编码参数之前
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                CheckboxPref(
+                    prefKey = Preferences.regionRecordingKey,
+                    title = stringResource(R.string.region_recording),
+                    summary = stringResource(R.string.region_recording_desc),
+                    onCheckedChange = { checked ->
+                        regionRecordingEnabled = checked
+                        if (checked && !overlayPermissionGranted) {
+                            openOverlaySettings(context)
+                        }
+                    }
+                )
+                if (regionRecordingEnabled && !overlayPermissionGranted) {
+                    Spacer(modifier = Modifier.height(5.dp))
+                    Text(
+                        text = stringResource(R.string.region_recording_permission_missing),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(modifier = Modifier.height(5.dp))
+                    Button(onClick = { openOverlaySettings(context) }) {
+                        Text(stringResource(R.string.open_overlay_settings))
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+            }
             ChipSelector(
                 title = stringResource(R.string.video_codec),
                 entries = VideoFormat.codecs.map { it.name },
@@ -565,8 +596,8 @@ fun SettingsScreen() {
                 onCheckedChange = { checked ->
                     volumeKeyStopEnabled = checked
                     // 打开开关时如果服务还没开，先尝试静默写回（有 WRITE_SECURE_SETTINGS
-                    // 时可行），否则再带用户去系统设置
-                    if (checked && !accessibilityEnabled) {
+                    // 时可行），否则再带用户去系统设置。已经用 LSPosed 模块时不需要无障碍。
+                    if (checked && !volumeKeyUseXposed && !accessibilityEnabled) {
                         if (VolumeKeyStopHelper.selfHeal(context)) {
                             accessibilityEnabled = true
                         } else {
@@ -576,27 +607,38 @@ fun SettingsScreen() {
                 }
             )
             if (volumeKeyStopEnabled) {
+                Spacer(modifier = Modifier.height(10.dp))
+                // 声明启用 LSPosed 模块：模块在亮屏和息屏都能接管，
+                // 勾选后不再要求开启无障碍服务，也不再显示无障碍相关入口
+                CheckboxPref(
+                    prefKey = Preferences.volumeKeyStopXposedKey,
+                    title = stringResource(R.string.volume_key_stop_xposed),
+                    summary = stringResource(R.string.volume_key_stop_xposed_desc),
+                    onCheckedChange = { volumeKeyUseXposed = it }
+                )
                 Spacer(modifier = Modifier.height(5.dp))
                 Text(
                     text = stringResource(
-                        if (accessibilityEnabled) {
-                            R.string.volume_key_stop_permission_granted
-                        } else {
-                            R.string.volume_key_stop_permission_missing
+                        when {
+                            volumeKeyUseXposed -> R.string.volume_key_stop_xposed_active
+                            accessibilityEnabled -> R.string.volume_key_stop_permission_granted
+                            else -> R.string.volume_key_stop_permission_missing
                         }
                     ),
                     fontSize = 12.sp,
-                    color = if (accessibilityEnabled) {
+                    color = if (volumeKeyUseXposed || accessibilityEnabled) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     } else {
                         MaterialTheme.colorScheme.error
                     }
                 )
-                Spacer(modifier = Modifier.height(5.dp))
-                AutoHealPref(
-                    granted = adbGranted,
-                    onClick = { showAutoHeal = true }
-                )
+                if (!volumeKeyUseXposed) {
+                    Spacer(modifier = Modifier.height(5.dp))
+                    AutoHealPref(
+                        granted = adbGranted,
+                        onClick = { showAutoHeal = true }
+                    )
+                }
                 Spacer(modifier = Modifier.height(10.dp))
                 HoldDurationPref(
                     holdMs = volumeKeyHoldMs,
@@ -607,32 +649,6 @@ fun SettingsScreen() {
                         }
                     }
                 )
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Spacer(modifier = Modifier.height(10.dp))
-                CheckboxPref(
-                    prefKey = Preferences.regionRecordingKey,
-                    title = stringResource(R.string.region_recording),
-                    summary = stringResource(R.string.region_recording_desc),
-                    onCheckedChange = { checked ->
-                        regionRecordingEnabled = checked
-                        if (checked && !overlayPermissionGranted) {
-                            openOverlaySettings(context)
-                        }
-                    }
-                )
-                if (regionRecordingEnabled && !overlayPermissionGranted) {
-                    Spacer(modifier = Modifier.height(5.dp))
-                    Text(
-                        text = stringResource(R.string.region_recording_permission_missing),
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    Spacer(modifier = Modifier.height(5.dp))
-                    Button(onClick = { openOverlaySettings(context) }) {
-                        Text(stringResource(R.string.open_overlay_settings))
-                    }
-                }
             }
 
             SectionDivider()
