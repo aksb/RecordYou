@@ -27,6 +27,24 @@ object RecorderStatusHolder {
     /** 每种录制开始的时间（elapsedRealtime），用于跨入口恢复计时。 */
     private val startedAt = mutableMapOf<RecorderType, Long>()
 
+    /** 已经停止、但采集器/文件还在收尾的类型 */
+    private val finalizing = mutableSetOf<RecorderType>()
+
+    /**
+     * 是否还有录制在收尾（写 moov、合流）。此时对外状态已经是空闲，
+     * 但旧的 MediaRecorder 可能还没释放，最好不要立刻开始新的录制。
+     */
+    val isFinalizing: Boolean
+        get() = finalizing.isNotEmpty()
+
+    fun beginFinalize(type: RecorderType) {
+        finalizing.add(type)
+    }
+
+    fun endFinalize(type: RecorderType) {
+        finalizing.remove(type)
+    }
+
     fun stateOf(type: RecorderType): RecorderState = states[type] ?: RecorderState.IDLE
 
     /** true if a recording of any type is currently running. */

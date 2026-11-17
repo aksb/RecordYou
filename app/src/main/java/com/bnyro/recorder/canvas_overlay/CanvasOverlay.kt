@@ -17,19 +17,12 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
-import androidx.activity.ComponentActivity
 import androidx.annotation.RequiresApi
-import androidx.compose.ui.platform.ComposeView
 import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.setViewTreeLifecycleOwner
-import androidx.lifecycle.setViewTreeViewModelStoreOwner
-import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.RecorderState
 import com.bnyro.recorder.enums.RecorderType
-import com.bnyro.recorder.ui.theme.RecordYouTheme
 import com.bnyro.recorder.util.Preferences
 import com.bnyro.recorder.util.RecorderStatusHolder
 import kotlin.math.abs
@@ -60,20 +53,10 @@ class CanvasOverlay(private val context: Context) {
             remove()
         }
     }
-    private var canvasView = createCanvasView()
+
+    private var canvasView = DrawingView(context)
     private var canvasShown = false
 
-    private fun createCanvasView() = ComposeView(context).apply {
-        val activity = context as ComponentActivity
-        setViewTreeLifecycleOwner(activity)
-        setViewTreeViewModelStoreOwner(activity)
-        setViewTreeSavedStateRegistryOwner(activity)
-        setContent {
-            RecordYouTheme() {
-                MainCanvas()
-            }
-        }
-    }
     private var initialX = 0
     private var initialY = 0
     private var initialTouchX = 0f
@@ -81,9 +64,8 @@ class CanvasOverlay(private val context: Context) {
     private var dragging = false
 
     /**
-     * 悬浮窗被 removeViewImmediate + addView 重新入栈后，Compose 层的
-     * motionEventSpy 就收不到事件了（表现为"只能拖动一次"），所以拖动
-     * 放到 View 层的 dispatchTouchEvent 里处理，和窗口重加无关。
+     * 工具栏用原生 View（画布同理）：不依赖 Activity 生命周期，
+     * 悬浮窗被 removeViewImmediate + addView 重新入栈后点击和拖动都不受影响。
      */
     private inner class DraggableContainer(context: Context) : FrameLayout(context) {
         private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
@@ -131,15 +113,11 @@ class CanvasOverlay(private val context: Context) {
         }
     }
 
-    private val canvasViewModel: CanvasViewModel by lazy {
-        ViewModelProvider(context as ComponentActivity)[CanvasViewModel::class.java]
-    }
-
     private var currentDrawMode = DrawMode.Eraser
 
     private fun setDrawMode(mode: DrawMode) {
         currentDrawMode = mode
-        canvasViewModel.currentPath.drawMode = mode
+        canvasView.drawMode = mode
         drawModeButton.setImageResource(
             if (mode == DrawMode.Eraser) R.drawable.ic_draw_pen
             else R.drawable.ic_eraser_black_24dp
@@ -179,7 +157,7 @@ class CanvasOverlay(private val context: Context) {
         setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
         contentDescription = context.getString(R.string.annotation_clear)
         setOnClickListener {
-            canvasViewModel.paths.clear()
+            canvasView.clear()
             hideCanvas()
             // 清除后回到初始状态：否则图标还是"橡皮擦"而画布已经隐藏，
             // 用户要连点两次才能继续画
@@ -242,6 +220,9 @@ class CanvasOverlay(private val context: Context) {
             }
             // 尺寸要等布局完成后才知道，这时再把记住的位置收回屏幕内
             toolbarView.post { clampToolbarToScreen() }
+            // 注释窗口是后添加的，会压在悬浮球之上（两者重叠时球就点不到了），
+            // 把球重新入栈，保证任何时候都能用球停止录制。
+            OverlayCoordinator.raiseAll(includeCanvas = false)
         } catch (e: Exception) {
             Log.e("Show Overlay", e.toString())
         }
@@ -272,13 +253,8 @@ class CanvasOverlay(private val context: Context) {
     private fun raiseViews(raiseCanvas: Boolean) {
         if (raiseCanvas) {
             runCatching {
-                // windowToken 对没有设置 token 的 overlay 窗口恒为 null，只能用 parent 判断
-                val wasAdded = canvasView.parent != null
-                if (wasAdded) windowManager.removeViewImmediate(canvasView)
-                // Compose 窗口重新入栈后指针输入会失效（画不上），换一个新的实例
-                canvasView = createCanvasView()
-                if (wasAdded) {
-                    canvasView.isInvisible = !canvasShown
+                if (canvasView.parent != null) {
+                    windowManager.removeViewImmediate(canvasView)
                     windowManager.addView(canvasView, canvasViewParams)
                 }
             }.onFailure { Log.e("Raise Overlay", it.toString()) }
@@ -309,6 +285,9 @@ class CanvasOverlay(private val context: Context) {
         canvasShown = true
         canvasView.isVisible = true
         setCanvasTouchable(false)
+        // 画布是后添加的全屏窗口，可触摸之后会盖住先添加的悬浮球，
+        // 点球就停不了录制了。这里把球重新入栈到画布之上。
+        canvasView.post { OverlayCoordinator.raiseAll(includeCanvas = false) }
     }
 
     fun hideCanvas() {

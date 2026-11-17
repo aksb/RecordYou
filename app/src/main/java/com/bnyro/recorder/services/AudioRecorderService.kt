@@ -181,15 +181,18 @@ class AudioRecorderService : RecorderService() {
         if (isDestroying) return
         isDestroying = true
 
+        super.onDestroy()
+    }
+
+    override fun onStopCapture() {
+        // 运行在后台线程：写 m4a 的 moov、释放编码器可能阻塞几十秒，
+        // 放在主线程会让停止广播排队，看起来就是“怎么都停不下来”。
         systemAudioRecorder?.let {
-            it.stop()
-            it.release()
+            runCatching { it.stop() }
+            runCatching { it.release() }
         }
         systemAudioRecorder = null
-
-        super.onDestroy()
-
-        mediaProjection?.stop()
+        runCatching { mediaProjection?.stop() }
         mediaProjection = null
     }
 

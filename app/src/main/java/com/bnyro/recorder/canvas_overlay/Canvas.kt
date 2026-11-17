@@ -1,144 +1,97 @@
 package com.bnyro.recorder.canvas_overlay
 
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
-import androidx.lifecycle.viewmodel.compose.viewModel
-
-enum class MotionEvent {
-    Up, Down, Idle, Move
-}
+import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.view.MotionEvent
+import android.view.View
 
 enum class DrawMode {
     Pen, Eraser
 }
 
-@Composable
-fun MainCanvas(canvasViewModel: CanvasViewModel = viewModel()) {
-    var motionEvent by remember { mutableStateOf(MotionEvent.Idle) }
+/**
+ * 注释画布。
+ *
+ * 之前用 ComposeView 承载：从悬浮球开始录制时宿主 Activity 处于 STOPPED，
+ * Compose 的 recomposer / 指针输入会跟着暂停，表现为怎么画都没反应；
+ * 悬浮窗重新入栈后指针输入还会彻底失效。改成普通 View 后不依赖任何
+ * Activity 生命周期，和工具栏的处理方式保持一致。
+ */
+class DrawingView(context: Context) : View(context) {
+    private class Stroke(val path: Path, val eraser: Boolean)
 
-    var currentPosition by remember { mutableStateOf(Offset.Unspecified) }
+    private val strokes = mutableListOf<Stroke>()
+    private var currentStroke: Stroke? = null
+    private val density = resources.displayMetrics.density
 
-    val drawModifier = Modifier
-        .fillMaxSize()
-        .pointerInput(Unit) {
-            awaitEachGesture {
-                val downEvent = awaitFirstDown()
-                currentPosition = downEvent.position
-                motionEvent = MotionEvent.Down
-                if (downEvent.pressed != downEvent.previousPressed) downEvent.consume()
-                do {
-                    val event = awaitPointerEvent()
-                    if (event.changes.size == 1) {
-                        currentPosition = event.changes[0].position
-                        motionEvent = MotionEvent.Move
-                        if (event.changes[0].positionChange() != Offset.Zero) event.changes[0].consume()
-                    }
-                } while (event.changes.any { it.pressed })
-                motionEvent = MotionEvent.Up
-            }
-        }
-    Canvas(modifier = drawModifier) {
-        with(drawContext.canvas.nativeCanvas) {
-            val checkPoint = saveLayer(null, null)
-            when (motionEvent) {
-                MotionEvent.Idle -> Unit
-                MotionEvent.Down -> {
-                    canvasViewModel.paths.add(canvasViewModel.currentPath)
-                    canvasViewModel.currentPath.path.moveTo(
-                        currentPosition.x,
-                        currentPosition.y
-                    )
-                }
-
-                MotionEvent.Move -> {
-                    canvasViewModel.currentPath.path.lineTo(
-                        currentPosition.x,
-                        currentPosition.y
-                    )
-                    drawCircle(
-                        center = currentPosition,
-                        color = Color.Gray,
-                        radius = canvasViewModel.currentPath.strokeWidth / 2,
-                        style = Stroke(
-                            width = 1f
-                        )
-                    )
-                }
-
-                MotionEvent.Up -> {
-                    canvasViewModel.currentPath.path.lineTo(
-                        currentPosition.x,
-                        currentPosition.y
-                    )
-                    canvasViewModel.currentPath = PathProperties(
-                        path = Path(),
-                        strokeWidth = canvasViewModel.currentPath.strokeWidth,
-                        color = canvasViewModel.currentPath.color,
-                        drawMode = canvasViewModel.currentPath.drawMode
-                    )
-                    currentPosition = Offset.Unspecified
-                    motionEvent = MotionEvent.Idle
-                }
-            }
-            canvasViewModel.paths.forEach { path ->
-                path.draw(this@Canvas)
-            }
-            restoreToCount(checkPoint)
-        }
+    private val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        color = Color.RED
+        strokeWidth = 4f * density
     }
-}
 
-class PathProperties(
-    var path: Path = Path(),
-    var strokeWidth: Float = 10f,
-    var color: Color = Color.Red,
-    var drawMode: DrawMode = DrawMode.Pen
-) {
-    fun draw(scope: DrawScope) {
-        when (drawMode) {
-            DrawMode.Pen -> {
-                scope.drawPath(
-                    color = color,
-                    path = path,
-                    style = Stroke(
-                        width = strokeWidth,
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round
-                    )
-                )
+    private val eraserPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        strokeWidth = 16f * density
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+    }
+
+    var drawMode = DrawMode.Eraser
+
+    fun clear() {
+        strokes.clear()
+        currentStroke = null
+        invalidate()
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val stroke = Stroke(Path(), drawMode == DrawMode.Eraser)
+                stroke.path.moveTo(event.x, event.y)
+                currentStroke = stroke
+                strokes.add(stroke)
+                invalidate()
             }
 
-            DrawMode.Eraser -> {
-                scope.drawPath(
-                    color = Color.Transparent,
-                    path = path,
-                    style = Stroke(
-                        width = 50f,
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round
-                    ),
-                    blendMode = BlendMode.Clear
-                )
+            MotionEvent.ACTION_MOVE -> {
+                val stroke = currentStroke
+                if (stroke != null) {
+                    // 一次 MOVE 可能带多个采样点，逐个连上，快速划动才不会断续
+                    for (i in 0 until event.historySize) {
+                        stroke.path.lineTo(event.getHistoricalX(i), event.getHistoricalY(i))
+                    }
+                    stroke.path.lineTo(event.x, event.y)
+                    invalidate()
+                }
+            }
+
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                currentStroke = null
+                invalidate()
             }
         }
+        // 其余动作（多指按下/抬起等）也返回 true，避免手势中途被父 View 接管
+        return true
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        if (strokes.isEmpty()) return
+        // 橡皮擦靠 CLEAR 清除已经画上去的笔迹，必须限制在同一个图层里
+        val layer = canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
+        for (stroke in strokes) {
+            canvas.drawPath(stroke.path, if (stroke.eraser) eraserPaint else penPaint)
+        }
+        canvas.restoreToCount(layer)
     }
 }

@@ -121,7 +121,14 @@ class LosslessRecorderService : RecorderService() {
             }
 
         if (outputStream == null) {
-            Toast.makeText(this, R.string.cant_access_selected_folder, Toast.LENGTH_LONG).show()
+            // 这里运行在后台线程，Toast 必须切回主线程
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                Toast.makeText(
+                    this,
+                    R.string.cant_access_selected_folder,
+                    Toast.LENGTH_LONG
+                ).show()
+            }
             return
         }
 
@@ -133,15 +140,22 @@ class LosslessRecorderService : RecorderService() {
         if (isDestroying) return
         isDestroying = true
 
-        recorderState = RecorderState.IDLE
-        audioRecorder?.stop()
-        audioRecorder?.release()
-        audioRecorder = null
-        recorderThread = null
-
-        convertToWav()
-
+        // recorderState 由基类同步置为 IDLE，写线程据此退出
         super.onDestroy()
+    }
+
+    override fun onStopCapture() {
+        // 运行在后台线程：转换整段 PCM 到 WAV 很慢，放在主线程会卡住
+        // 停止流程（之前就是这里让服务看起来“永远停不下来”）。
+        audioRecorder?.let {
+            runCatching { it.stop() }
+            runCatching { it.release() }
+        }
+        audioRecorder = null
+        // 等写线程退出后再转换，否则文件可能还没写完
+        recorderThread?.let { runCatching { it.join(2000) } }
+        recorderThread = null
+        convertToWav()
     }
 
     override fun getCurrentAmplitude() = currentMaxAmplitude

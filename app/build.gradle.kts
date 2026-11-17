@@ -138,6 +138,9 @@ dependencies {
     //Navigation
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
+    // Xposed 模块入口：仅编译期依赖，运行时由 LSPosed 注入，不能打进 APK
+    compileOnly("de.robv.android.xposed:api:82")
+
     // Testing
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

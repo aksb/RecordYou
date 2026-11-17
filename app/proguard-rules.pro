@@ -12,6 +12,12 @@
 #   public *;
 #}
 
+# Xposed 入口类由 LSPosed 按名字反射加载，必须保留
+-keep class com.bnyro.recorder.xposed.** { *; }
+
+# Xposed API 仅编译期存在，运行时由 LSPosed 提供
+-dontwarn de.robv.android.xposed.**
+
 # Uncomment this to preserve the line number information for
 # debugging stack traces.
 #-keepattributes SourceFile,LineNumberTable

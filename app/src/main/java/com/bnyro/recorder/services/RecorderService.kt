@@ -10,8 +10,11 @@ import android.content.IntentFilter
 import android.media.MediaRecorder
 import android.os.Binder
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -26,6 +29,7 @@ import com.bnyro.recorder.ui.MainActivity
 import com.bnyro.recorder.util.NotificationHelper
 import com.bnyro.recorder.util.PermissionHelper
 import com.bnyro.recorder.util.RecorderStatusHolder
+import com.bnyro.recorder.util.XposedVolumeKeyState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -58,6 +62,12 @@ abstract class RecorderService : LifecycleService() {
     /** 已经开始收尾（收尾可能发生在框架真正销毁服务之前） */
     protected val isShuttingDown: Boolean
         get() = cleanedUp
+
+    /** 采集器是否已经释放：决定什么时候允许开始下一段录制 */
+    @Volatile
+    private var finalizeReleased = false
+
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     /**
      * 占用一次启动机会。重复绑定/重复点击都会再次调用 [start]，如果没有
@@ -155,11 +165,22 @@ abstract class RecorderService : LifecycleService() {
             recorderState = RecorderState.ACTIVE
             RecorderStatusHolder.updateState(recorderType, recorderState)
         }
+        // 把录制状态同步给 system_server 里的 LSPosed 模块（未安装模块时无副作用）
+        XposedVolumeKeyState.start(this)
         updateNotification()
     }
 
     /** 录制停止、文件描述符关闭后调用，用于内部音频合流等收尾工作 */
     protected open suspend fun onRecordingStopped() {}
+
+    /**
+     * 释放采集器（内部音频、裁剪编码器、MediaProjection 等）。
+     *
+     * 运行在后台线程：里面的每一步（写 m4a 的 moov、停止编码器）都可能
+     * 阻塞几十秒，绝不能放在主线程，否则停止广播会一直排队，服务看起来
+     * 就像“怎么都停不下来”。
+     */
+    protected open fun onStopCapture() {}
 
     override fun onDestroy() {
         // 停止广播、MediaProjection 回调和系统销毁都会走到这里：
@@ -167,11 +188,26 @@ abstract class RecorderService : LifecycleService() {
         if (cleanedUp) return
         cleanedUp = true
 
-        // 本地状态立即置空闲（无损录音的写线程依赖它退出），但对外状态
-        // 要等收尾（合流、写 moov）完成后再更新：否则停止后马上开始新的
-        // 录制时，旧实例仍在收尾，两个实例抢 MediaProjection / 内部音频
-        // 会导致崩溃或 0KB 文件。
+        // 本地状态立即置空闲（无损录音的写线程依赖它退出）
         runCatching { recorderState = RecorderState.IDLE }
+
+        // 对外状态也必须立刻回到空闲：停止已经生效，UI、悬浮球、计时和
+        // 音量键都要马上停下来。合流/写 moov 可能还要几十秒，若继续对外
+        // 报告“正在录制”，用户会以为没停成功，反复长按、反复弹“已停止”。
+        RecorderStatusHolder.updateState(recorderType, RecorderState.IDLE)
+
+        // 但采集器还没释放完，此时开新录制会和旧的 MediaRecorder 抢编码器，
+        // 所以先拦住；用超时兜底，万一收尾卡死也不会永远没法再录。
+        RecorderStatusHolder.beginFinalize(recorderType)
+        mainHandler.postDelayed({
+            if (!finalizeReleased) {
+                Log.w(TAG, "停止收尾超时，强制允许开始新的录制")
+                releaseFinalizeGate()
+            }
+        }, FINALIZE_TIMEOUT_MS)
+
+        // 停止已经生效，立刻通知 system_server 里的模块放开音量键
+        if (!RecorderStatusHolder.isRecording) XposedVolumeKeyState.stop(this)
 
         NotificationManagerCompat.from(this)
             .cancel(NotificationHelper.RECORDING_NOTIFICATION_ID)
@@ -195,23 +231,36 @@ abstract class RecorderService : LifecycleService() {
         super.onDestroy()
     }
 
+    private fun releaseFinalizeGate() {
+        if (finalizeReleased) return
+        finalizeReleased = true
+        RecorderStatusHolder.endFinalize(recorderType)
+    }
+
     private suspend fun finishCleanup() {
         runCatching {
             withContext(Dispatchers.IO) {
+                runCatching { onStopCapture() }
                 recorder?.runCatching {
                     stop()
                     release()
                 }
                 recorder = null
-                fileDescriptor?.close()
-                runCatching { onRecordingStopped() }
+                runCatching { fileDescriptor?.close() }
+                fileDescriptor = null
             }
+        }
+
+        // 采集器和输出文件都释放了，合流可以继续在后台跑，但新的录制
+        // 已经可以开始，不必等合流写完。
+        withContext(Dispatchers.Main.immediate) { releaseFinalizeGate() }
+
+        runCatching {
+            withContext(Dispatchers.IO) { runCatching { onRecordingStopped() } }
 
             createRecordingFinishedNotification()
             outputFile = null
         }
-
-        RecorderStatusHolder.updateState(recorderType, RecorderState.IDLE)
     }
 
     @SuppressLint("MissingPermission")
@@ -269,6 +318,11 @@ abstract class RecorderService : LifecycleService() {
     abstract fun getCurrentAmplitude(): Int?
 
     companion object {
+        private const val TAG = "RecorderService"
+
+        /** 收尾（释放采集器）的最长等待时间，超时后不再阻拦新的录制 */
+        private const val FINALIZE_TIMEOUT_MS = 15_000L
+
         const val RECORDER_INTENT_ACTION = "com.bnyro.recorder.RECORDER_ACTION"
         const val FILE_NAME_EXTRA_KEY = "fileName"
         const val ACTION_EXTRA_KEY = "action"

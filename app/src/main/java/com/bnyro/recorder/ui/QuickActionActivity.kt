@@ -67,9 +67,11 @@ class QuickActionActivity : ComponentActivity() {
             runCatching { RecorderType.valueOf(it) }.getOrNull()
         } ?: RecorderType.NONE
 
-        // 已有录制在进行时不再启动第二个：旧逻辑会先杀掉正在收尾的服务，
-        // 结果就是文件损坏 / 崩溃 / 停不下来。
-        if (type != RecorderType.NONE && RecorderStatusHolder.activeType != null) {
+        // 已有录制在进行（或上一段还在收尾）时不再启动第二个：旧逻辑会先
+        // 杀掉正在收尾的服务，结果就是文件损坏 / 崩溃 / 停不下来。
+        if (type != RecorderType.NONE &&
+            (RecorderStatusHolder.activeType != null || RecorderStatusHolder.isFinalizing)
+        ) {
             Toast.makeText(this, R.string.floating_ball_other_recording, Toast.LENGTH_SHORT).show()
             moveTaskToBack(true)
             return

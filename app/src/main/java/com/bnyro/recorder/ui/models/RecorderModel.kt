@@ -218,13 +218,13 @@ class RecorderModel : ViewModel() {
      * 会同时抢占 MediaProjection / 内部音频，直接导致崩溃或 0KB 文件。
      */
     private fun canStart(context: Context): Boolean {
-        if (RecorderStatusHolder.activeType == null) return true
+        if (RecorderStatusHolder.activeType == null && !RecorderStatusHolder.isFinalizing) return true
         Toast.makeText(context, R.string.floating_ball_other_recording, Toast.LENGTH_SHORT).show()
         return false
     }
 
     private fun startRecorderService(context: Context, intent: Intent): Boolean {
-        if (RecorderStatusHolder.activeType != null) return false
+        if (RecorderStatusHolder.activeType != null || RecorderStatusHolder.isFinalizing) return false
 
         detachService()
         // 绑定和解绑必须使用同一个 Context：Android 以"外层 Context"为键

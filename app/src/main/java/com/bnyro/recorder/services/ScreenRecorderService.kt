@@ -528,13 +528,6 @@ class ScreenRecorderService : RecorderService() {
     }
 
     override suspend fun onRecordingStopped() {
-        // 区域录制：先停止裁剪编码器，把最后几帧和 moov 写完再合流
-        val encoder = regionEncoder
-        regionEncoder = null
-        if (encoder != null) {
-            runCatching { encoder.stop() }
-            encoder.firstFrameNanos?.let { videoStartNanos = it }
-        }
         runCatching { tempAudioDescriptor?.close() }
         tempAudioDescriptor = null
 
@@ -653,14 +646,11 @@ class ScreenRecorderService : RecorderService() {
         if (isDestroying) return
         isDestroying = true
 
-        systemAudioRecorder?.let {
-            it.stop()
-            it.release()
-        }
-        systemAudioRecorder = null
-        // 临时视频文件的 fd 必须等 MediaRecorder 停止后再关闭（在
-        // onRecordingStopped 里处理），否则 moov 无法正常写入。
-
+        // 先把画面采集链路断开，再让基类去停 MediaRecorder：VirtualDisplay
+        // 还在往 recorder 的 surface 送帧时调用 stop()，编码器很容易卡在
+        // 里面，表现就是“长按后一直停不下来，也没法开始新的录制”。
+        runCatching { virtualDisplay?.release() }
+        virtualDisplay = null
         // 选区界面和区域外遮罩不属于录制内容，结束时要立刻消失
         setSelectingRegion(false)
         regionSelectorOverlay?.remove()
@@ -669,14 +659,31 @@ class ScreenRecorderService : RecorderService() {
         regionMaskOverlay = null
 
         super.onDestroy()
-        virtualDisplay?.release()
+    }
+
+    override fun onStopCapture() {
+        // 运行在后台线程：写 m4a 的 moov、停止编码器都可能阻塞几十秒，
+        // 放在主线程会让停止广播排队，看起来就是“怎么都停不下来”。
+        systemAudioRecorder?.let {
+            runCatching { it.stop() }
+            runCatching { it.release() }
+        }
+        systemAudioRecorder = null
+
+        // 区域录制：把最后几帧和 moov 写完，合流时才能读到完整视频
+        regionEncoder?.let { encoder ->
+            runCatching { encoder.stop() }
+            encoder.firstFrameNanos?.let { videoStartNanos = it }
+        }
+        regionEncoder = null
+
         // Without this, the MediaProjection session (and the persistent
         // "screen recording/casting" status bar icon tied to it) stays
         // alive even after we're done - releasing the VirtualDisplay only
         // stops feeding it frames, it doesn't hand the projection token
         // back. Previously the icon would only clear once the whole app
         // process was killed.
-        mediaProjection?.stop()
+        runCatching { mediaProjection?.stop() }
         mediaProjection = null
     }
 

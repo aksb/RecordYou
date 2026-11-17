@@ -17,6 +17,13 @@
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- LSPosed 模块的状态同步：只有同签名的本应用安装包才能发送录制状态 -->
+    <permission
+        android:name="${applicationId}.permission.VOLUME_KEY_STATE"
+        android:protectionLevel="signature" />
+
+    <uses-permission android:name="${applicationId}.permission.VOLUME_KEY_STATE" />
+
     <!-- Opt out for network permissions that are optional for the ExoPlayer -->
     <uses-permission
         android:name="android.permission.ACCESS_NETWORK_STATE"
@@ -32,6 +39,18 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.RecordYou"
         tools:targetApi="31">
+
+        <!-- LSPosed 模块声明：入口类见 assets/xposed_init，作用域为系统框架 -->
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="录制中息屏长按音量键停止（需要 LSPosed）" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="82" />
+
         <!-- 快捷录制入口：透明无启动画面，单独一个任务，不出现在最近任务里 -->
         <activity
             android:name=".ui.QuickActionActivity"
@@ -96,6 +115,13 @@
             android:name=".receivers.FinishedNotificationReceiver"
             android:enabled="true"
             android:exported="false" />
+
+        <!-- 只接受系统（uid 1000 持有 STATUS_BAR）发来的停止指令 -->
+        <receiver
+            android:name=".receivers.XposedStopReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.STATUS_BAR" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
