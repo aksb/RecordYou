@@ -86,11 +86,22 @@ jobs:
           java-version: '17'
           distribution: temurin
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
+      # runner 自带 SDK，但 sdkmanager 不在 PATH 里；不使用 setup-android，
+      # 它启动时会执行 `sdkmanager tools`，而新版仓库已没有 tools 包，必然失败
       - name: Install Android SDK packages
-        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -maxdepth 3 -type f -name sdkmanager -print -quit 2>/dev/null)
+          if [ -z "$SDKMANAGER" ]; then
+            echo "::error::找不到 sdkmanager，SDK 目录：$SDK_ROOT"
+            exit 1
+          fi
+          echo "Using $SDKMANAGER"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
