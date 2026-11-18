@@ -15,6 +15,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -26,8 +27,11 @@ import com.bnyro.recorder.enums.RecorderState
 import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.receivers.FinishedNotificationReceiver
 import com.bnyro.recorder.ui.MainActivity
+import com.bnyro.recorder.util.MotionStopDetector
 import com.bnyro.recorder.util.NotificationHelper
 import com.bnyro.recorder.util.PermissionHelper
+import com.bnyro.recorder.util.Preferences
+import com.bnyro.recorder.util.RecorderControl
 import com.bnyro.recorder.util.RecorderStatusHolder
 import com.bnyro.recorder.util.XposedVolumeKeyState
 import kotlinx.coroutines.CoroutineScope
@@ -68,6 +72,9 @@ abstract class RecorderService : LifecycleService() {
     private var finalizeReleased = false
 
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** 摇一摇 / 翻转停止的传感器监听，仅录制期间存在 */
+    private var motionStopDetector: MotionStopDetector? = null
 
     /**
      * 占用一次启动机会。重复绑定/重复点击都会再次调用 [start]，如果没有
@@ -167,7 +174,19 @@ abstract class RecorderService : LifecycleService() {
         }
         // 把录制状态同步给 system_server 里的 LSPosed 模块（未安装模块时无副作用）
         XposedVolumeKeyState.start(this)
+        startMotionStop()
         updateNotification()
+    }
+
+    /** 摇一摇 / 翻转停止：只在录制期间打开传感器监听 */
+    private fun startMotionStop() {
+        if (motionStopDetector != null) return
+        if (!Preferences.prefs.getBoolean(Preferences.motionStopKey, false)) return
+        motionStopDetector = MotionStopDetector(this) {
+            if (RecorderStatusHolder.activeType == null) return@MotionStopDetector
+            RecorderControl.requestStopActive(this)
+            Toast.makeText(this, R.string.motion_stop_toast, Toast.LENGTH_SHORT).show()
+        }.also { it.start() }
     }
 
     /** 录制停止、文件描述符关闭后调用，用于内部音频合流等收尾工作 */
@@ -187,6 +206,10 @@ abstract class RecorderService : LifecycleService() {
         // cleanedUp 保证收尾只跑一遍（上一次已经把 super.onDestroy() 调用过了）。
         if (cleanedUp) return
         cleanedUp = true
+
+        // 传感器监听及时释放，避免录制结束后继续响应摇一摇
+        runCatching { motionStopDetector?.stop() }
+        motionStopDetector = null
 
         // 本地状态立即置空闲（无损录音的写线程依赖它退出）
         runCatching { recorderState = RecorderState.IDLE }

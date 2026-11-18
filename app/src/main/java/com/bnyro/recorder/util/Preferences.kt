@@ -64,6 +64,11 @@ object Preferences {
     const val volumeKeyStopXposedKey = "volumeKeyStopXposed"
     const val volumeKeyStopHoldMsKey = "volumeKeyStopHoldMs"
     const val volumeKeyStopHoldDefaultMs = 800
+    // 摇一摇 / 翻转（屏幕朝下）停止录制，仅在录制期间监听传感器
+    const val motionStopKey = "motionStop"
+    // 触发灵敏度 1..5，数值越大越容易触发
+    const val motionStopSensitivityKey = "motionStopSensitivity"
+    const val motionStopSensitivityDefault = 3
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREF_FILE_NAME, Context.MODE_PRIVATE)

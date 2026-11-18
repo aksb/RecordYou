@@ -139,6 +139,11 @@
     <string name="volume_key_stop_broken_toast">音量键长按停止当前无效：无障碍服务未开启，且未启用 LSPosed 模块</string>
     <string name="volume_key_stop_dialog_ignore">知道了</string>
     <string name="volume_key_stop_view_fix">查看修复方法</string>
+    <string name="motion_stop">摇一摇 / 翻转停止</string>
+    <string name="motion_stop_desc">录制过程中摇一摇手机，或把手机翻转成屏幕朝下，即可停止当前录制。仅在录制期间生效。</string>
+    <string name="motion_stop_sensitivity">触发灵敏度</string>
+    <string name="motion_stop_sensitivity_value">灵敏度 %1$d / 5，数值越大越容易触发</string>
+    <string name="motion_stop_toast">已通过摇一摇 / 翻转停止录制</string>
     <string name="auto_heal_title">无障碍自动恢复</string>
     <string name="auto_heal_action">自动恢复</string>
     <string name="auto_heal_desc">清理最近任务有可能会关闭无障碍服务。授予 adb 或 root 权限后（任选其一，哪个方便用哪个），失效时 app 会自动把服务写回，不用每次手动去系统设置。</string>

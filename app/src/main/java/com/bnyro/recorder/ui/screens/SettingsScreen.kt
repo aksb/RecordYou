@@ -168,6 +168,18 @@ fun SettingsScreen() {
     var volumeKeyUseXposed by remember {
         mutableStateOf(VolumeKeyStopHelper.isXposedDeclared())
     }
+    // 摇一摇 / 翻转停止
+    var motionStopEnabled by remember {
+        mutableStateOf(Preferences.prefs.getBoolean(Preferences.motionStopKey, false))
+    }
+    var motionSensitivity by remember {
+        mutableStateOf(
+            Preferences.prefs.getInt(
+                Preferences.motionStopSensitivityKey,
+                Preferences.motionStopSensitivityDefault
+            )
+        )
+    }
     // 区域录制的选区界面需要“显示在其他应用上层”权限
     var overlayPermissionGranted by remember {
         mutableStateOf(
@@ -650,6 +662,25 @@ fun SettingsScreen() {
                     }
                 )
             }
+            Spacer(modifier = Modifier.height(10.dp))
+            CheckboxPref(
+                prefKey = Preferences.motionStopKey,
+                title = stringResource(R.string.motion_stop),
+                summary = stringResource(R.string.motion_stop_desc),
+                onCheckedChange = { motionStopEnabled = it }
+            )
+            if (motionStopEnabled) {
+                Spacer(modifier = Modifier.height(10.dp))
+                MotionSensitivityPref(
+                    sensitivity = motionSensitivity,
+                    onValueChange = { motionSensitivity = it },
+                    onValueChangeFinished = {
+                        Preferences.edit {
+                            putInt(Preferences.motionStopSensitivityKey, motionSensitivity)
+                        }
+                    }
+                )
+            }
 
             SectionDivider()
             SectionTitle(stringResource(R.string.section_other))
@@ -859,6 +890,36 @@ private fun HoldDurationPref(
         onValueChangeFinished = onValueChangeFinished,
         valueRange = 300f..2000f,
         steps = 16
+    )
+}
+
+/**
+ * 摇一摇 / 翻转的触发灵敏度，1（最不容易触发）到 5（最容易触发）。
+ */
+@Composable
+private fun MotionSensitivityPref(
+    sensitivity: Int,
+    onValueChange: (Int) -> Unit,
+    onValueChangeFinished: () -> Unit
+) {
+    Text(
+        text = stringResource(R.string.motion_stop_sensitivity),
+        fontWeight = FontWeight.Bold,
+        fontSize = 18.sp
+    )
+    Spacer(modifier = Modifier.height(2.dp))
+    Text(
+        text = stringResource(R.string.motion_stop_sensitivity_value, sensitivity),
+        fontSize = 13.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Slider(
+        value = sensitivity.toFloat(),
+        onValueChange = { onValueChange(it.roundToInt()) },
+        onValueChangeFinished = onValueChangeFinished,
+        valueRange = 1f..5f,
+        // 只保留整档，避免拖出 3.4 这种无意义的值
+        steps = 3
     )
 }
 

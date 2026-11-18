@@ -147,6 +147,11 @@
     <string name="volume_key_stop_broken_toast">Volume key stop is inactive: the accessibility service is off and the LSPosed module is not enabled</string>
     <string name="volume_key_stop_dialog_ignore">Got it</string>
     <string name="volume_key_stop_view_fix">View fix</string>
+    <string name="motion_stop">Stop by shaking or flipping</string>
+    <string name="motion_stop_desc">Shake the phone or turn it face down to stop the recording in progress. Only active while recording.</string>
+    <string name="motion_stop_sensitivity">Trigger sensitivity</string>
+    <string name="motion_stop_sensitivity_value">Sensitivity %1$d / 5, higher triggers more easily</string>
+    <string name="motion_stop_toast">Recording stopped by shaking or flipping</string>
     <!-- Accessibility auto-restore -->
     <string name="auto_heal_title">Accessibility auto-restore</string>
     <string name="auto_heal_action">Auto-restore</string>
