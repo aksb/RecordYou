@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        LSPosed 作用域推荐列表，配合 AndroidManifest.xml 里的 xposedscope 声明使用。
+        "android" 是安卓系统框架进程（system_server）的包名——VolumeKeyModule 挂的
+        PhoneWindowManager.interceptKeyBeforeQueueing 就跑在这个进程里，本模块要生效，
+        用户必须在 LSPosed 作用域列表里勾上它。这里声明为推荐项，LSPosed 会把它
+        置顶显示，避免漏勾（参考 CallerID_Module 的同款配置，已实测生效）。
+    -->
+    <string-array name="xposed_scope">
+        <item>android</item>
+    </string-array>
+</resources>

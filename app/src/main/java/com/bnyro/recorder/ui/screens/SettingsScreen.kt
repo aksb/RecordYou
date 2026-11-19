@@ -618,36 +618,50 @@ fun SettingsScreen() {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                // 子项1：无障碍状态只做检测展示，是否开启由系统设置决定
+                // 两个状态行要互相参考对方状态，先取一次探测结果（Compose 状态，变化自动重组）
+                val lsStatus = LsposedModuleDetector.status
+                val lsActive = lsStatus == LsposedModuleDetector.Status.ACTIVE
+                // 子项1：无障碍状态只做展示，是否开启由系统设置决定。
+                // 模块已在兜底时改用中性文案，避免出现与事实矛盾的「亮屏无效」
                 PermissionStatusRow(
                     title = stringResource(R.string.a11y_status_title),
                     status = stringResource(
-                        if (accessibilityEnabled) {
-                            R.string.a11y_status_ok
-                        } else {
-                            R.string.a11y_status_missing
+                        when {
+                            accessibilityEnabled -> R.string.a11y_status_ok
+                            lsActive -> R.string.a11y_status_missing_covered
+                            else -> R.string.a11y_status_missing
                         }
                     ),
-                    ok = accessibilityEnabled
+                    ok = when {
+                        accessibilityEnabled -> true
+                        lsActive -> null
+                        else -> false
+                    }
                 )
                 Spacer(modifier = Modifier.height(5.dp))
                 // 无障碍设置入口：打开系统设置与自动恢复都在同一个弹窗里
                 AccessibilitySettingsPref { showAutoHeal = true }
                 Spacer(modifier = Modifier.height(10.dp))
-                // 子项2：LSPosed 状态只做展示，探测在进入页面 / 打开开关时自动触发
-                val lsStatus = LsposedModuleDetector.status
+                // 子项2：LSPosed 状态只做展示，探测在进入页面 / 打开开关时自动触发。
+                // 无障碍已开启时模块只是熄屏增强，用中性文案，不断言整体无效
                 PermissionStatusRow(
                     title = stringResource(R.string.lsposed_status_title),
                     status = stringResource(
                         when (lsStatus) {
                             LsposedModuleDetector.Status.ACTIVE -> R.string.lsposed_status_ok
-                            LsposedModuleDetector.Status.INACTIVE -> R.string.lsposed_status_missing
+                            LsposedModuleDetector.Status.INACTIVE ->
+                                if (accessibilityEnabled) {
+                                    R.string.lsposed_status_missing_a11y_on
+                                } else {
+                                    R.string.lsposed_status_missing
+                                }
+
                             else -> R.string.lsposed_status_checking
                         }
                     ),
                     ok = when (lsStatus) {
                         LsposedModuleDetector.Status.ACTIVE -> true
-                        LsposedModuleDetector.Status.INACTIVE -> false
+                        LsposedModuleDetector.Status.INACTIVE -> !accessibilityEnabled
                         else -> null
                     }
                 )
@@ -782,8 +796,8 @@ private fun AccessibilitySettingsPref(onClick: () -> Unit) {
 
 /**
  * 授权状态展示行：只有标题和状态两行文字，不做成开关—— * 能不能用由系统里的实际授权决定，这里只负责如实显示。
- * ok 为 null 表示正在检测，用中性色显示。
- * 状态文字固定预留两行高度，避免 ✔/✖ 文案长度不同导致下方元素跳动。
+ * ok 为 null 用中性色显示（检测中，或已由另一机制覆盖）。
+ * 状态文字固定预留两行高度，避免文案长度不同导致下方元素跳动。
  */
 @Composable
 private fun PermissionStatusRow(title: String, status: String, ok: Boolean?) {

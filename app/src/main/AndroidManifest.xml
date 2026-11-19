@@ -50,6 +50,11 @@
         <meta-data
             android:name="xposedminversion"
             android:value="82" />
+        <!-- 作用域推荐列表：模块只 hook system_server（"android" 包）里的
+             PhoneWindowManager，声明为推荐项后 LSPosed 会把「系统框架」置顶显示 -->
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposed_scope" />
 
         <!-- 快捷录制入口：透明无启动画面，单独一个任务，不出现在最近任务里 -->
         <activity
