@@ -13,6 +13,7 @@ import androidx.activity.viewModels
 import com.bnyro.recorder.R
 import com.bnyro.recorder.enums.RecorderType
 import com.bnyro.recorder.ui.models.RecorderModel
+import com.bnyro.recorder.util.LsposedModuleDetector
 import com.bnyro.recorder.util.RecorderStatusHolder
 import com.bnyro.recorder.util.VolumeKeyStopHelper
 
@@ -115,11 +116,15 @@ class QuickActionActivity : ComponentActivity() {
     }
 
     /**
-     * 尝试把被系统摘掉的无障碍服务写回，仍然失败就 Toast 提醒。
+     * 无障碍被摘掉时的启动前提醒：先确认 LSPosed 是否在兜底，
+     * 在则完全静默；否则尝试自愈，仍然失败才 Toast 提醒。
      * 这里不拦截录制，只是让用户知道长按音量键当前不可用。
      */
     private fun notifyVolumeKeyBroken() {
         Thread {
+            // 先问 LSPosed 模块：模块在兜底就完全不打扰用户，
+            // 也不去做会把无障碍服务偷偷写回系统的自愈
+            if (LsposedModuleDetector.detectBlocking(this)) return@Thread
             val healed = runCatching {
                 VolumeKeyStopHelper.selfHeal(this) ||
                     VolumeKeyStopHelper.selfHealWithRoot(this)

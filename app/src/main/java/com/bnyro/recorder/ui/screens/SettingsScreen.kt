@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -68,6 +69,7 @@ import com.bnyro.recorder.ui.components.NamingPatternPref
 import com.bnyro.recorder.ui.dialogs.AboutDialog
 import com.bnyro.recorder.ui.dialogs.AutoHealDialog
 import com.bnyro.recorder.ui.models.ThemeModel
+import com.bnyro.recorder.util.LsposedModuleDetector
 import com.bnyro.recorder.util.PickFolderContract
 import com.bnyro.recorder.util.Preferences
 import com.bnyro.recorder.util.VolumeKeyStopHelper
@@ -149,9 +151,6 @@ fun SettingsScreen() {
     var accessibilityEnabled by remember {
         mutableStateOf(VolumeKeyStopHelper.isReady(context))
     }
-    var adbGranted by remember {
-        mutableStateOf(VolumeKeyStopHelper.canWriteSecureSettings(context))
-    }
     var showAutoHeal by remember { mutableStateOf(false) }
     var volumeKeyStopEnabled by remember {
         mutableStateOf(Preferences.prefs.getBoolean(Preferences.volumeKeyStopKey, false))
@@ -163,10 +162,6 @@ fun SettingsScreen() {
                 Preferences.volumeKeyStopHoldDefaultMs
             )
         )
-    }
-    // 用户声明已启用 LSPosed 模块后，亮屏/息屏都由模块接管，不再要求无障碍服务
-    var volumeKeyUseXposed by remember {
-        mutableStateOf(VolumeKeyStopHelper.isXposedDeclared())
     }
     // 摇一摇 / 翻转停止
     var motionStopEnabled by remember {
@@ -195,7 +190,8 @@ fun SettingsScreen() {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 accessibilityEnabled = VolumeKeyStopHelper.isReady(context)
-                adbGranted = VolumeKeyStopHelper.canWriteSecureSettings(context)
+                // 从系统设置回来后同步刷新 LSPosed 探测结果（内部有 30 秒缓存）
+                if (volumeKeyStopEnabled) LsposedModuleDetector.detect(context)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     overlayPermissionGranted = Settings.canDrawOverlays(context)
                 }
@@ -607,50 +603,54 @@ fun SettingsScreen() {
                 summary = stringResource(R.string.volume_key_stop_desc),
                 onCheckedChange = { checked ->
                     volumeKeyStopEnabled = checked
-                    // 打开开关时如果服务还没开，先尝试静默写回（有 WRITE_SECURE_SETTINGS
-                    // 时可行），否则再带用户去系统设置。已经用 LSPosed 模块时不需要无障碍。
-                    if (checked && !volumeKeyUseXposed && !accessibilityEnabled) {
-                        if (VolumeKeyStopHelper.selfHeal(context)) {
-                            accessibilityEnabled = true
-                        } else {
-                            VolumeKeyStopHelper.openAccessibilitySettings(context)
-                        }
-                    }
+                    // 打开总开关只展开下面的子项，不跳转任何设置页；
+                    // 是否去开无障碍由用户自己点「无障碍设置」行决定
+                    if (checked) LsposedModuleDetector.detect(context)
                 }
             )
             if (volumeKeyStopEnabled) {
-                Spacer(modifier = Modifier.height(10.dp))
-                // 声明启用 LSPosed 模块：模块在亮屏和息屏都能接管，
-                // 勾选后不再要求开启无障碍服务，也不再显示无障碍相关入口
-                CheckboxPref(
-                    prefKey = Preferences.volumeKeyStopXposedKey,
-                    title = stringResource(R.string.volume_key_stop_xposed),
-                    summary = stringResource(R.string.volume_key_stop_xposed_desc),
-                    onCheckedChange = { volumeKeyUseXposed = it }
-                )
                 Spacer(modifier = Modifier.height(5.dp))
+                // 两种授权方式各自的生效范围，先讲清楚再展示状态
                 Text(
-                    text = stringResource(
-                        when {
-                            volumeKeyUseXposed -> R.string.volume_key_stop_xposed_active
-                            accessibilityEnabled -> R.string.volume_key_stop_permission_granted
-                            else -> R.string.volume_key_stop_permission_missing
+                    text = stringResource(R.string.volume_key_stop_modes_desc),
+                    fontSize = 12.sp,
+                    lineHeight = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                // 子项1：无障碍状态只做检测展示，是否开启由系统设置决定
+                PermissionStatusRow(
+                    title = stringResource(R.string.a11y_status_title),
+                    status = stringResource(
+                        if (accessibilityEnabled) {
+                            R.string.a11y_status_ok
+                        } else {
+                            R.string.a11y_status_missing
                         }
                     ),
-                    fontSize = 12.sp,
-                    color = if (volumeKeyUseXposed || accessibilityEnabled) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.error
+                    ok = accessibilityEnabled
+                )
+                Spacer(modifier = Modifier.height(5.dp))
+                // 无障碍设置入口：打开系统设置与自动恢复都在同一个弹窗里
+                AccessibilitySettingsPref { showAutoHeal = true }
+                Spacer(modifier = Modifier.height(10.dp))
+                // 子项2：LSPosed 状态只做展示，探测在进入页面 / 打开开关时自动触发
+                val lsStatus = LsposedModuleDetector.status
+                PermissionStatusRow(
+                    title = stringResource(R.string.lsposed_status_title),
+                    status = stringResource(
+                        when (lsStatus) {
+                            LsposedModuleDetector.Status.ACTIVE -> R.string.lsposed_status_ok
+                            LsposedModuleDetector.Status.INACTIVE -> R.string.lsposed_status_missing
+                            else -> R.string.lsposed_status_checking
+                        }
+                    ),
+                    ok = when (lsStatus) {
+                        LsposedModuleDetector.Status.ACTIVE -> true
+                        LsposedModuleDetector.Status.INACTIVE -> false
+                        else -> null
                     }
                 )
-                if (!volumeKeyUseXposed) {
-                    Spacer(modifier = Modifier.height(5.dp))
-                    AutoHealPref(
-                        granted = adbGranted,
-                        onClick = { showAutoHeal = true }
-                    )
-                }
                 Spacer(modifier = Modifier.height(10.dp))
                 HoldDurationPref(
                     holdMs = volumeKeyHoldMs,
@@ -736,7 +736,6 @@ fun SettingsScreen() {
         AutoHealDialog(
             onDismiss = {
                 showAutoHeal = false
-                adbGranted = VolumeKeyStopHelper.canWriteSecureSettings(context)
                 accessibilityEnabled = VolumeKeyStopHelper.isReady(context)
             },
             onOpenAccessibilitySettings = {
@@ -756,11 +755,11 @@ private fun SectionTitle(text: String) {
 }
 
 /**
- * 无障碍自动恢复的入口。做成可点击的整行而不是 Checkbox，
- * 避免和上面的开关混淆；右侧箭头表示会打开配置弹窗。
+ * 「无障碍设置」入口行。做成可点击的整行而不是 Checkbox，
+ * 避免和上面的状态展示混淆；右侧箭头表示会打开配置弹窗。
  */
 @Composable
-private fun AutoHealPref(granted: Boolean, onClick: () -> Unit) {
+private fun AccessibilitySettingsPref(onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -768,25 +767,44 @@ private fun AutoHealPref(granted: Boolean, onClick: () -> Unit) {
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = stringResource(R.string.auto_heal_title), fontSize = 14.sp)
-            Text(
-                text = stringResource(
-                    if (granted) {
-                        R.string.auto_heal_summary_granted
-                    } else {
-                        R.string.auto_heal_summary_missing
-                    }
-                ),
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        Text(
+            text = stringResource(R.string.auto_heal_title),
+            fontSize = 14.sp,
+            modifier = Modifier.weight(1f)
+        )
         Icon(
             imageVector = Icons.Default.ChevronRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+/**
+ * 授权状态展示行：只有标题和状态两行文字，不做成开关—— * 能不能用由系统里的实际授权决定，这里只负责如实显示。
+ * ok 为 null 表示正在检测，用中性色显示。
+ * 状态文字固定预留两行高度，避免 ✔/✖ 文案长度不同导致下方元素跳动。
+ */
+@Composable
+private fun PermissionStatusRow(title: String, status: String, ok: Boolean?) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, fontSize = 14.sp)
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = status,
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                modifier = Modifier.heightIn(min = 30.dp),
+                color = when (ok) {
+                    false -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
+        }
     }
 }
 

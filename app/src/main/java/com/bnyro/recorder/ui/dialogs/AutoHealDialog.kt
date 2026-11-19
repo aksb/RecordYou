@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -44,9 +45,10 @@ import kotlinx.coroutines.withContext
 private enum class RootState { UNKNOWN, BUSY, GRANTED, WRITTEN, UNAVAILABLE }
 
 /**
- * 无障碍自动恢复的配置卡片。
+ * 「无障碍设置」配置卡片。
  *
  * 设置页入口、首页警告条和警告弹窗都打开这一个弹窗，保证三处信息一致。
+ * 结构：功能一直接跳系统无障碍设置；功能二是自动恢复（内容不变）。
  * adb 教程直接内联展开，不再叠加第二层弹窗。
  */
 @Composable
@@ -109,6 +111,20 @@ fun AutoHealDialog(
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState())
             ) {
+                // 功能一：打开系统无障碍设置
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onOpenAccessibilitySettings()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.open_accessibility_settings))
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 功能二：无障碍自动恢复，内容保持不变
                 Text(
                     text = stringResource(R.string.auto_heal_desc),
                     fontSize = 13.sp,
@@ -159,17 +175,8 @@ fun AutoHealDialog(
                 }
             }
         },
+        // 该版本 AlertDialog 的 confirmButton 为必填，关闭按钮放右下角
         confirmButton = {
-            TextButton(
-                onClick = {
-                    onDismiss()
-                    onOpenAccessibilitySettings()
-                }
-            ) {
-                Text(stringResource(R.string.open_accessibility_settings))
-            }
-        },
-        dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.close))
             }

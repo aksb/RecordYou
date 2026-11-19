@@ -38,6 +38,9 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
     const val ACTION_STOP = "com.bnyro.recorder.action.XPOSED_VOLUME_KEY_STOP"
 
     private const val ACTION_STATE = "com.bnyro.recorder.action.XPOSED_VOLUME_KEY_STATE"
+    /** App 探活：问模块在不在，收到就回 pong，与录制状态无关 */
+    private const val ACTION_PING = "com.bnyro.recorder.action.XPOSED_VOLUME_KEY_PING"
+    private const val ACTION_PONG = "com.bnyro.recorder.action.XPOSED_VOLUME_KEY_PONG"
     private val STATE_PERMISSION = BuildConfig.APPLICATION_ID + ".permission.VOLUME_KEY_STATE"
     private const val EXTRA_ACTIVE = "active"
     private const val EXTRA_HOLD_MS = "holdMs"
@@ -81,17 +84,24 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
 
     private val stateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action != ACTION_STATE) return
-            runCatching {
-                active = intent.getBooleanExtra(EXTRA_ACTIVE, false)
-                accessibilityEnabled = intent.getBooleanExtra(EXTRA_ACCESSIBILITY, false)
-                holdMs = intent.getIntExtra(EXTRA_HOLD_MS, holdMs).coerceIn(MIN_HOLD_MS, MAX_HOLD_MS)
-                expireAt = if (active) SystemClock.elapsedRealtime() + STATE_TIMEOUT_MS else 0L
+            when (intent?.action) {
+                ACTION_STATE -> runCatching {
+                    active = intent.getBooleanExtra(EXTRA_ACTIVE, false)
+                    accessibilityEnabled = intent.getBooleanExtra(EXTRA_ACCESSIBILITY, false)
+                    holdMs = intent.getIntExtra(EXTRA_HOLD_MS, holdMs).coerceIn(MIN_HOLD_MS, MAX_HOLD_MS)
+                    expireAt = if (active) SystemClock.elapsedRealtime() + STATE_TIMEOUT_MS else 0L
 
-                val snapshot = "active=$active a11y=$accessibilityEnabled hold=$holdMs"
-                if (snapshot != lastLoggedState) {
-                    lastLoggedState = snapshot
-                    XposedBridge.log("[RecordYou] state $snapshot")
+                    val snapshot = "active=$active a11y=$accessibilityEnabled hold=$holdMs"
+                    if (snapshot != lastLoggedState) {
+                        lastLoggedState = snapshot
+                        XposedBridge.log("[RecordYou] state $snapshot")
+                    }
+                }
+                // 探活应答：只证明模块注入成功，不改变任何录制状态
+                ACTION_PING -> runCatching {
+                    context?.sendBroadcast(
+                        Intent(ACTION_PONG).setPackage(BuildConfig.APPLICATION_ID)
+                    )
                 }
             }
         }
@@ -261,7 +271,11 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
         synchronized(this) {
             if (receiverRegistered) return
             runCatching {
-                val filter = IntentFilter(ACTION_STATE)
+                // 同一个接收器同时处理录制状态同步与探活 ping
+                val filter = IntentFilter().apply {
+                    addAction(ACTION_STATE)
+                    addAction(ACTION_PING)
+                }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     context.registerReceiver(
                         stateReceiver,

@@ -72,6 +72,7 @@ import com.bnyro.recorder.ui.dialogs.ConfirmationDialog
 import com.bnyro.recorder.ui.models.PlayerModel
 import com.bnyro.recorder.ui.models.RecorderModel
 import com.bnyro.recorder.util.FloatingBallHelper
+import com.bnyro.recorder.util.LsposedModuleDetector
 import com.bnyro.recorder.util.VolumeKeyStopHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -128,6 +129,13 @@ fun HomeScreen(
     }
 
     fun refreshVolumeKeyState() {
+        if (!VolumeKeyStopHelper.isWanted() || VolumeKeyStopHelper.isReady(context)) {
+            volumeKeyBroken = false
+            return
+        }
+        // 无障碍不可用：先异步问 LSPosed 模块是否在兜底（30 秒内不重复探测），
+        // 探测期间 needsAttention 返回 false，不会先闪一条警告再消失
+        LsposedModuleDetector.detect(context)
         if (!VolumeKeyStopHelper.needsAttention(context)) {
             volumeKeyBroken = false
             return
@@ -180,6 +188,9 @@ fun HomeScreen(
 
     // 冷启动时 Activity 可能已经处于 RESUMED，ON_RESUME 不会再触发一次
     LaunchedEffect(Unit) { refreshVolumeKeyState() }
+
+    // LSPosed 探测结果落地后重新评估一次警告：兜底生效就不再提示
+    LaunchedEffect(LsposedModuleDetector.status) { refreshVolumeKeyState() }
 
     // Whichever type's page you're currently on - the sort/select-all/delete
     // actions in the top bar all act on this list, never both at once.

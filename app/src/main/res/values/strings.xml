@@ -132,11 +132,14 @@
     <string name="volume_key_stop_hold_value">%1$d ms</string>
     <string name="volume_key_stop_service_label">Volume key stop</string>
     <string name="volume_key_stop_service_desc">Stops a running RecordYou recording when a volume key is held down. Key events are only used for this, no screen content is read.</string>
-    <string name="volume_key_stop_permission_missing">The accessibility service is off, so holding a volume key does nothing yet.</string>
-    <string name="volume_key_stop_permission_granted">The accessibility service is on.</string>
-    <string name="volume_key_stop_xposed">I have installed and enabled the LSPosed module</string>
-    <string name="volume_key_stop_xposed_desc">Select “System Framework” in LSPosed. Once checked, the accessibility service is no longer required, and holding a volume key works with the screen on or off.</string>
-    <string name="volume_key_stop_xposed_active">Handled by the LSPosed module, works with the screen on or off.</string>
+    <string name="volume_key_stop_modes_desc">Accessibility works only with the screen on; the LSPosed module works with the screen on or off. With both enabled, the screen-on path uses accessibility and the screen-off path uses LSPosed. Pick whichever suits you, enabling both is optional.</string>
+    <string name="a11y_status_title">Accessibility permission status</string>
+    <string name="a11y_status_ok">On — holding a volume key stops recordings with the screen on ✔</string>
+    <string name="a11y_status_missing">Off or revoked by the system, holding a volume key does nothing ✖</string>
+    <string name="lsposed_status_title">LSPosed permission status</string>
+    <string name="lsposed_status_checking">Checking…</string>
+    <string name="lsposed_status_ok">Module active — works with the screen on or off ✔</string>
+    <string name="lsposed_status_missing">Module not detected, does not work with the screen on or off ✖ (restart the phone after updating)</string>
     <string name="open_accessibility_settings">Open accessibility settings</string>
     <string name="volume_key_stop_toast">Recording stopped</string>
     <string name="volume_key_stop_broken_title">Volume key stop is inactive</string>
@@ -153,11 +156,9 @@
     <string name="motion_stop_sensitivity_value">Sensitivity %1$d / 5, higher triggers more easily</string>
     <string name="motion_stop_toast">Recording stopped by shaking or flipping</string>
     <!-- Accessibility auto-restore -->
-    <string name="auto_heal_title">Accessibility auto-restore</string>
+    <string name="auto_heal_title">Accessibility settings</string>
     <string name="auto_heal_action">Auto-restore</string>
     <string name="auto_heal_desc">Clearing recent tasks can turn off the accessibility service. Grant either adb or root access (whichever is easier for you), and the app will restore the service automatically when it gets turned off, so you no longer need to visit system settings each time.</string>
-    <string name="auto_heal_summary_granted">adb granted</string>
-    <string name="auto_heal_summary_missing">adb not granted, tap to see how</string>
     <string name="auto_heal_adb_status">adb authorization: %1$s</string>
     <string name="adb_grant_granted">granted</string>
     <string name="adb_grant_missing">not granted</string>

@@ -49,18 +49,19 @@ object VolumeKeyStopHelper {
     fun isReady(context: Context): Boolean = isDeclared(context) || isBound(context)
 
     /**
-     * 用户已经声明启用了 LSPosed 模块。模块在息屏和无障碍不可用时都会接管，
-     * 因此这种情况下无障碍服务不是必需项，也不应该提示用户去开启。
+     * 开关打开、但当前没有任何可用的按键拦截方式：
+     * 无障碍不可用，且 LSPosed 模块也未确认生效。
+     * 模块状态由 LsposedModuleDetector 维护（界面触发探测），
+     * 检测进行中先不下结论，避免警告闪一下又消失。
      */
-    fun isXposedDeclared(): Boolean =
-        Preferences.prefs.getBoolean(Preferences.volumeKeyStopXposedKey, false)
-
-    /**
-     * 开关打开、但两种实现都不可用。LSPosed 模块由用户自己声明启用，
-     * 已声明时不再因为无障碍服务缺失而提示。
-     */
-    fun needsAttention(context: Context): Boolean =
-        isWanted() && !isXposedDeclared() && !isReady(context)
+    fun needsAttention(context: Context): Boolean {
+        if (!isWanted() || isReady(context)) return false
+        return when (LsposedModuleDetector.status) {
+            LsposedModuleDetector.Status.ACTIVE,
+            LsposedModuleDetector.Status.CHECKING -> false
+            else -> true
+        }
+    }
 
     fun canWriteSecureSettings(context: Context): Boolean =
         context.packageManager.checkPermission(
