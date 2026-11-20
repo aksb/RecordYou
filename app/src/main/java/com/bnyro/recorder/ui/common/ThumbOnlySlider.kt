@@ -22,16 +22,18 @@ import kotlin.math.abs
  */
 @Composable
 fun Modifier.thumbOnlyDrag(value: Float, valueRange: ClosedFloatingPointRange<Float>): Modifier {
-    // 用 UpdatedState 读最新值，避免拖动过程中值变化导致 pointerInput 重启
+    // 用 UpdatedState 读最新值：range 每次重组都是新对象且无结构相等性，
+    // 不能拿它当 pointerInput 的 key，否则拖动中每次数值变化都会重启手势处理器
     val currentValue by rememberUpdatedState(value)
-    return this.pointerInput(valueRange) {
+    val currentRange by rememberUpdatedState(valueRange)
+    return this.pointerInput(Unit) {
         val touchRadius = 36.dp.toPx()
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             val width = size.width.toFloat()
             if (width <= 0f) return@awaitEachGesture
-            val fraction = ((currentValue - valueRange.start) /
-                (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
+            val fraction = ((currentValue - currentRange.start) /
+                (currentRange.endInclusive - currentRange.start)).coerceIn(0f, 1f)
             val thumbX = fraction * width
             if (abs(down.position.x - thumbX) > touchRadius) {
                 // 不是从圆点出发的手势：消费到底，Slider 完全无感

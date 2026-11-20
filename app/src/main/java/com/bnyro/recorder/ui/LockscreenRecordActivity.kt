@@ -1,5 +1,7 @@
 package com.bnyro.recorder.ui
 
+import android.app.Activity
+import android.app.KeyguardManager
 import android.os.Build
 import android.content.Intent
 import android.os.Bundle
@@ -14,7 +16,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
@@ -26,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -157,6 +162,40 @@ private fun QuickRecordPage(recorderModel: RecorderModel) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        // 顶部按钮条：解锁（弹系统原生认证界面，指纹/PIN 与系统锁屏一致）、
+        // 返回锁屏（关掉本页，录音若在跑不受影响）
+        val activity = context as? Activity
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            TextButton(onClick = {
+                if (activity == null) return@TextButton
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val keyguardManager =
+                        activity.getSystemService(KeyguardManager::class.java)
+                    keyguardManager?.requestDismissKeyguard(
+                        activity,
+                        object : KeyguardManager.KeyguardDismissCallback() {
+                            override fun onDismissSucceeded() {
+                                activity.finish()
+                            }
+                        }
+                    )
+                } else {
+                    activity.finish()
+                }
+            }) {
+                Text(stringResource(R.string.quick_record_unlock))
+            }
+            TextButton(onClick = { activity?.finish() }) {
+                Text(stringResource(R.string.quick_record_back_to_lockscreen))
+            }
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
         when {
             activeType == RecorderType.AUDIO -> {
                 recorderModel.recordedTime?.let {
@@ -219,7 +258,7 @@ private fun QuickRecordPage(recorderModel: RecorderModel) {
             }
         }
 
-        Spacer(modifier = Modifier.height(60.dp))
+        Spacer(modifier = Modifier.weight(1f))
         // 熄屏倒计时：三个模板值在设置页可改
         Text(
             text = stringResource(
@@ -245,5 +284,6 @@ private fun QuickRecordPage(recorderModel: RecorderModel) {
                 }
             }
         }
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }

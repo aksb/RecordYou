@@ -166,6 +166,8 @@
     <string name="quick_record_screen_off_in">Screen off in %1$s</string>
     <string name="screen_off_templates_title">Screen-off countdown presets (minutes)</string>
     <string name="screen_off_template_n">Preset %1$d (minutes)</string>
+    <string name="quick_record_unlock">Unlock</string>
+    <string name="quick_record_back_to_lockscreen">Back to lock screen</string>
     <string name="motion_stop">Stop by shaking or flipping</string>
     <string name="motion_stop_desc">Shake the phone or turn it face down to stop the recording in progress. Only active while recording.</string>
     <string name="motion_stop_sensitivity">Trigger sensitivity</string>

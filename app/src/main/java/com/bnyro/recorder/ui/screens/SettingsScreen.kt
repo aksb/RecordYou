@@ -40,6 +40,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -915,16 +916,24 @@ private fun MixRatioPref(
         fontSize = 13.sp,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
+    // 同 HoldDurationPref：拖动期间用未取整浮点值，松手才取整
+    var dragValue by remember { mutableFloatStateOf((100 - micPercent).toFloat()) }
     Slider(
         // 滑块从左到右依次是“话筒”到“内部音频”，所以位置值用内部音频占比
-        value = (100 - micPercent).toFloat(),
-        onValueChange = { onValueChange(100 - it.roundToInt()) },
-        onValueChangeFinished = onValueChangeFinished,
+        value = dragValue,
+        onValueChange = {
+            dragValue = it
+            onValueChange(100 - it.roundToInt())
+        },
+        onValueChangeFinished = {
+            dragValue = dragValue.roundToInt().toFloat()
+            onValueChangeFinished()
+        },
         valueRange = 0f..100f,
         // 以 5% 为一档，避免拖动时出现无意义的精确值
         steps = 19,
         enabled = enabled,
-        modifier = Modifier.thumbOnlyDrag((100 - micPercent).toFloat(), 0f..100f)
+        modifier = Modifier.thumbOnlyDrag(dragValue, 0f..100f)
     )
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -972,13 +981,23 @@ private fun HoldDurationPref(
         fontSize = 13.sp,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
+    // 拖动期间用未取整的浮点值驱动 Slider：直接把取整后的值回传会让
+    // Slider 内部锚点被重置到刻度上，不到一格的位移全被吃掉（表现为
+    // 一次只能拖动一格）。松手后才取整落定。
+    var dragValue by remember { mutableFloatStateOf(holdMs.toFloat()) }
     Slider(
-        value = holdMs.toFloat(),
-        onValueChange = { onValueChange(it.roundToInt()) },
-        onValueChangeFinished = onValueChangeFinished,
+        value = dragValue,
+        onValueChange = {
+            dragValue = it
+            onValueChange(it.roundToInt())
+        },
+        onValueChangeFinished = {
+            dragValue = dragValue.roundToInt().toFloat()
+            onValueChangeFinished()
+        },
         valueRange = 300f..2000f,
         steps = 16,
-        modifier = Modifier.thumbOnlyDrag(holdMs.toFloat(), 300f..2000f)
+        modifier = Modifier.thumbOnlyDrag(dragValue, 300f..2000f)
     )
 }
 
@@ -1002,14 +1021,22 @@ private fun MotionSensitivityPref(
         fontSize = 13.sp,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
+    // 同 HoldDurationPref：拖动期间用未取整浮点值，松手才取整
+    var dragValue by remember { mutableFloatStateOf(sensitivity.toFloat()) }
     Slider(
-        value = sensitivity.toFloat(),
-        onValueChange = { onValueChange(it.roundToInt()) },
-        onValueChangeFinished = onValueChangeFinished,
+        value = dragValue,
+        onValueChange = {
+            dragValue = it
+            onValueChange(it.roundToInt())
+        },
+        onValueChangeFinished = {
+            dragValue = dragValue.roundToInt().toFloat()
+            onValueChangeFinished()
+        },
         valueRange = 1f..5f,
         // 只保留整档，避免拖出 3.4 这种无意义的值
         steps = 3,
-        modifier = Modifier.thumbOnlyDrag(sensitivity.toFloat(), 1f..5f)
+        modifier = Modifier.thumbOnlyDrag(dragValue, 1f..5f)
     )
 }
 
