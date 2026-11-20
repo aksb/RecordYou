@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -65,6 +66,7 @@ import com.bnyro.recorder.ui.common.ChipSelector
 import com.bnyro.recorder.ui.common.ClickableIcon
 import com.bnyro.recorder.ui.common.CustomNumInputPref
 import com.bnyro.recorder.ui.common.SelectionDialog
+import com.bnyro.recorder.ui.common.thumbOnlyDrag
 import com.bnyro.recorder.ui.components.NamingPatternPref
 import com.bnyro.recorder.ui.dialogs.AboutDialog
 import com.bnyro.recorder.ui.dialogs.AutoHealDialog
@@ -73,6 +75,7 @@ import com.bnyro.recorder.util.LsposedModuleDetector
 import com.bnyro.recorder.util.PickFolderContract
 import com.bnyro.recorder.util.Preferences
 import com.bnyro.recorder.util.VolumeKeyStopHelper
+import com.bnyro.recorder.util.XposedVolumeKeyState
 import kotlin.math.roundToInt
 
 private const val BITRATE_PRESET_LOW = 1_500_000
@@ -154,6 +157,18 @@ fun SettingsScreen() {
     var showAutoHeal by remember { mutableStateOf(false) }
     var volumeKeyStopEnabled by remember {
         mutableStateOf(Preferences.prefs.getBoolean(Preferences.volumeKeyStopKey, false))
+    }
+    // 锁屏（息屏）双键长按快捷录音，必须 LSPosed
+    var quickRecordEnabled by remember {
+        mutableStateOf(Preferences.prefs.getBoolean(Preferences.quickRecordLockscreenKey, false))
+    }
+    var quickRecordHoldMs by remember {
+        mutableStateOf(
+            Preferences.prefs.getInt(
+                Preferences.quickRecordHoldMsKey,
+                Preferences.volumeKeyStopHoldDefaultMs
+            ).coerceIn(300, 2000)
+        )
     }
     var volumeKeyHoldMs by remember {
         mutableStateOf(
@@ -678,6 +693,45 @@ fun SettingsScreen() {
             }
             Spacer(modifier = Modifier.height(10.dp))
             CheckboxPref(
+                prefKey = Preferences.quickRecordLockscreenKey,
+                title = stringResource(R.string.quick_record_lockscreen),
+                summary = stringResource(R.string.quick_record_lockscreen_desc),
+                onCheckedChange = { checked ->
+                    quickRecordEnabled = checked
+                    if (checked) LsposedModuleDetector.detect(context)
+                    XposedVolumeKeyState.syncQuickConfig(context)
+                }
+            )
+            // 总开关开启但模块未生效时给出提示；探测中（CHECKING）不告警
+            if (quickRecordEnabled &&
+                LsposedModuleDetector.status == LsposedModuleDetector.Status.INACTIVE
+            ) {
+                Spacer(modifier = Modifier.height(5.dp))
+                Text(
+                    text = stringResource(R.string.quick_record_lsposed_missing),
+                    fontSize = 12.sp,
+                    lineHeight = 15.sp,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            if (quickRecordEnabled) {
+                Spacer(modifier = Modifier.height(5.dp))
+                HoldDurationPref(
+                    holdMs = quickRecordHoldMs,
+                    onValueChange = { quickRecordHoldMs = it },
+                    onValueChangeFinished = {
+                        Preferences.edit {
+                            putInt(Preferences.quickRecordHoldMsKey, quickRecordHoldMs)
+                        }
+                        XposedVolumeKeyState.syncQuickConfig(context)
+                    },
+                    titleRes = R.string.quick_record_hold
+                )
+                Spacer(modifier = Modifier.height(5.dp))
+                ScreenOffTemplatesPref()
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            CheckboxPref(
                 prefKey = Preferences.motionStopKey,
                 title = stringResource(R.string.motion_stop),
                 summary = stringResource(R.string.motion_stop_desc),
@@ -869,7 +923,8 @@ private fun MixRatioPref(
         valueRange = 0f..100f,
         // 以 5% 为一档，避免拖动时出现无意义的精确值
         steps = 19,
-        enabled = enabled
+        enabled = enabled,
+        modifier = Modifier.thumbOnlyDrag((100 - micPercent).toFloat(), 0f..100f)
     )
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -903,10 +958,11 @@ private fun MixRatioPref(
 private fun HoldDurationPref(
     holdMs: Int,
     onValueChange: (Int) -> Unit,
-    onValueChangeFinished: () -> Unit
+    onValueChangeFinished: () -> Unit,
+    titleRes: Int = R.string.volume_key_stop_hold
 ) {
     Text(
-        text = stringResource(R.string.volume_key_stop_hold),
+        text = stringResource(titleRes),
         fontWeight = FontWeight.Bold,
         fontSize = 18.sp
     )
@@ -921,7 +977,8 @@ private fun HoldDurationPref(
         onValueChange = { onValueChange(it.roundToInt()) },
         onValueChangeFinished = onValueChangeFinished,
         valueRange = 300f..2000f,
-        steps = 16
+        steps = 16,
+        modifier = Modifier.thumbOnlyDrag(holdMs.toFloat(), 300f..2000f)
     )
 }
 
@@ -951,8 +1008,88 @@ private fun MotionSensitivityPref(
         onValueChangeFinished = onValueChangeFinished,
         valueRange = 1f..5f,
         // 只保留整档，避免拖出 3.4 这种无意义的值
-        steps = 3
+        steps = 3,
+        modifier = Modifier.thumbOnlyDrag(sensitivity.toFloat(), 1f..5f)
     )
+}
+
+/**
+ * 锁屏录音页的三个熄屏倒计时模板（分钟），点击行打开弹窗一次改三个值。
+ */
+@Composable
+private fun ScreenOffTemplatesPref() {
+    val keys = listOf(
+        Preferences.screenOffTemplate1Key to Preferences.screenOffTemplate1Default,
+        Preferences.screenOffTemplate2Key to Preferences.screenOffTemplate2Default,
+        Preferences.screenOffTemplate3Key to Preferences.screenOffTemplate3Default
+    )
+    var values by remember {
+        mutableStateOf(keys.map { (key, def) -> Preferences.prefs.getInt(key, def).coerceIn(1, 600) })
+    }
+    var showDialog by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { showDialog = true }
+            .padding(vertical = 6.dp)
+    ) {
+        Text(
+            text = stringResource(R.string.screen_off_templates_title),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(5.dp))
+        Text(
+            text = values.map { stringResource(R.string.quick_record_minutes, it) }
+                .joinToString(" / "),
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
+
+    if (showDialog) {
+        val editValues = remember { values.map { mutableStateOf(it.toString()) } }
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text(stringResource(R.string.screen_off_templates_title)) },
+            text = {
+                Column {
+                    editValues.forEachIndexed { index, state ->
+                        OutlinedTextField(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 5.dp),
+                            value = state.value,
+                            onValueChange = { state.value = it },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            label = {
+                                Text(stringResource(R.string.screen_off_template_n, index + 1))
+                            }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val newValues = editValues.mapIndexed { index, state ->
+                        state.value.toIntOrNull()?.coerceIn(1, 600) ?: values[index]
+                    }
+                    keys.forEachIndexed { index, (key, _) ->
+                        Preferences.edit { putInt(key, newValues[index]) }
+                    }
+                    values = newValues
+                    showDialog = false
+                }) {
+                    Text(stringResource(R.string.save))
+                }
+            },
+            dismissButton = {
+                Button(onClick = { showDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
 }
 
 private fun openOverlaySettings(context: Context) {

@@ -61,6 +61,17 @@ object Preferences {
     const val volumeKeyStopKey = "volumeKeyStop"
     const val volumeKeyStopHoldMsKey = "volumeKeyStopHoldMs"
     const val volumeKeyStopHoldDefaultMs = 800
+    // 锁屏（息屏）时同时长按音量 +/- 快捷开始话筒录音（必须 LSPosed）
+    const val quickRecordLockscreenKey = "quickRecordLockscreen"
+    // 双键长按时长，与单键长按停止分开设置
+    const val quickRecordHoldMsKey = "quickRecordHoldMs"
+    // 锁屏录音页的三个熄屏倒计时模板（分钟）
+    const val screenOffTemplate1Key = "screenOffTemplate1"
+    const val screenOffTemplate2Key = "screenOffTemplate2"
+    const val screenOffTemplate3Key = "screenOffTemplate3"
+    const val screenOffTemplate1Default = 10
+    const val screenOffTemplate2Default = 30
+    const val screenOffTemplate3Default = 60
     // 摇一摇 / 翻转（屏幕朝下）停止录制，仅在录制期间监听传感器
     const val motionStopKey = "motionStop"
     // 触发灵敏度 1..5，数值越大越容易触发

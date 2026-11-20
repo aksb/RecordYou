@@ -21,23 +21,36 @@ import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XCallback
 
 /**
- * 息屏长按音量键停止录制（system_server 侧）。
+ * 息屏音量键手势（system_server 侧），两套功能共用一条按键序列状态机：
  *
- * 只在「息屏 + 收到 App 的录制状态」时接管音量键：吞掉 DOWN/重复/UP，
- * 达到设定时长后发广播让 App 停止录制；如果只是短按，UP 时补一次音量
- * 调节，所以音量值和音量条都不会被这次长按改变。
+ * ① 录制中长按单键停止：只在「录制中 + 停止开关开启 +（息屏 或 无障碍不可用）」
+ * 时接管：吞掉 DOWN/重复/UP，达到设定时长后发广播让 App 停止录制；短按在
+ * UP 时补一次音量调节，音量值和音量条都不会被这次长按改变。
  *
- * 亮屏时不拦截（交给 App 里的无障碍服务），但无障碍服务不可用时两种状态都接管。
+ * ② 空闲时双键长按快捷录音：总开关开启且息屏时，第一个音量键 DOWN 后开约
+ * 250ms 观察窗，另一个音量键在窗口内按下即视为双键组合，持续按住达到设定
+ * 时长后亮屏并发广播让 App 弹出锁屏录音页；只是单键短按则在 UP 时补调音量，
+ * 窗口关闭后长按重复事件照常放行，保持音量连调手感。录制中触发同一手势
+ * 时由 App 侧转为「停止」。
+ *
+ * 亮屏时不拦截单键停止（交给 App 里的无障碍服务），但无障碍服务不可用时
+ * 两种状态都接管。
  *
  * 用最高优先级注册：另一个常见模块（长按音量键切歌等）hook 的是同一个方法，
  * Xposed 的 before hook 按优先级从高到低执行、遇到 setResult 就终止后续 hook。
- * 录制期间必须由我们先吞掉按键，否则可能被对方抢走导致停止录制失效，
- * 或者两边同时触发。不录制时我们不做任何拦截，不影响其它模块。
+ * 接管期间必须由我们先吞掉按键，否则可能被对方抢走导致功能失效，
+ * 或者两边同时触发。未接管时我们不做任何拦截，不影响其它模块。
  */
 object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
     const val ACTION_STOP = "com.bnyro.recorder.action.XPOSED_VOLUME_KEY_STOP"
 
+    /** 双键长按快捷录音：录制中则由 App 转为停止 */
+    private const val ACTION_QUICK_START = "com.bnyro.recorder.action.XPOSED_QUICK_RECORD_START"
     private const val ACTION_STATE = "com.bnyro.recorder.action.XPOSED_VOLUME_KEY_STATE"
+    /** App 推送的功能配置（快捷录音总开关等），与录制状态无关、不过期 */
+    private const val ACTION_CONFIG = "com.bnyro.recorder.action.XPOSED_VOLUME_KEY_CONFIG"
+    /** App 请求立即熄屏（锁屏录音页的熄屏倒计时到期） */
+    private const val ACTION_GO_SLEEP = "com.bnyro.recorder.action.XPOSED_GO_SLEEP"
     /** App 探活：问模块在不在，收到就回 pong，与录制状态无关 */
     private const val ACTION_PING = "com.bnyro.recorder.action.XPOSED_VOLUME_KEY_PING"
     private const val ACTION_PONG = "com.bnyro.recorder.action.XPOSED_VOLUME_KEY_PONG"
@@ -45,6 +58,9 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
     private const val EXTRA_ACTIVE = "active"
     private const val EXTRA_HOLD_MS = "holdMs"
     private const val EXTRA_ACCESSIBILITY = "accessibility"
+    private const val EXTRA_STOP_ENABLED = "stopEnabled"
+    private const val EXTRA_QUICK_RECORD = "quickRecord"
+    private const val EXTRA_QUICK_HOLD_MS = "quickHoldMs"
 
     /** 心跳间隔 5 秒，20 秒收不到就视为录制结束，避免永久吞掉音量键 */
     private const val STATE_TIMEOUT_MS = 20_000L
@@ -52,16 +68,29 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
     private const val MAX_HOLD_MS = 3000
     private const val DEFAULT_HOLD_MS = 800
 
+    /** 双键识别窗口：第二个音量键必须在这个时间内按下 */
+    private const val DUAL_WINDOW_MS = 250L
+
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
     @Volatile
     private var active = false
 
     @Volatile
+    private var stopEnabled = false
+
+    @Volatile
+    private var quickRecordEnabled = false
+
+    @Volatile
     private var accessibilityEnabled = false
 
     @Volatile
     private var holdMs = DEFAULT_HOLD_MS
+
+    /** 双键长按的独立时长，与单键长按停止分开设置 */
+    @Volatile
+    private var quickHoldMs = DEFAULT_HOLD_MS
 
     @Volatile
     private var expireAt = 0L
@@ -75,9 +104,41 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
     private var pendingKeyCode = KeyEvent.KEYCODE_UNKNOWN
 
     @Volatile
+    private var secondKeyCode = KeyEvent.KEYCODE_UNKNOWN
+
+    @Volatile
     private var longPressTriggered = false
 
+    /** 当前序列是否为快捷录音接管（决定重复事件放行与双键识别） */
+    @Volatile
+    private var quickSeq = false
+
+    /** 当前序列是否同时武装了单键长按停止 */
+    @Volatile
+    private var seqStopArmed = false
+
+    @Volatile
+    private var dualWindowOpen = false
+
+    /** 双键已组合成功，正在计时 */
+    @Volatile
+    private var dualActive = false
+
+    /** 双键长按已触发，松手时不再补调音量 */
+    @Volatile
+    private var dualTriggered = false
+
+    /** 本序列组合过双键（即使未达到长按时长），松手时不补调音量 */
+    @Volatile
+    private var dualAttempted = false
+
+    /** 快捷录音序列里放行过长按重复事件，松手时不再补调音量 */
+    @Volatile
+    private var repeatForwarded = false
+
     private var pendingRunnable: Runnable? = null
+    private var dualWindowRunnable: Runnable? = null
+    private var dualHoldRunnable: Runnable? = null
     private var pendingHandler: Handler? = null
 
     private var lastLoggedState: String? = null
@@ -87,16 +148,28 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
             when (intent?.action) {
                 ACTION_STATE -> runCatching {
                     active = intent.getBooleanExtra(EXTRA_ACTIVE, false)
+                    stopEnabled = intent.getBooleanExtra(EXTRA_STOP_ENABLED, false)
                     accessibilityEnabled = intent.getBooleanExtra(EXTRA_ACCESSIBILITY, false)
                     holdMs = intent.getIntExtra(EXTRA_HOLD_MS, holdMs).coerceIn(MIN_HOLD_MS, MAX_HOLD_MS)
                     expireAt = if (active) SystemClock.elapsedRealtime() + STATE_TIMEOUT_MS else 0L
 
-                    val snapshot = "active=$active a11y=$accessibilityEnabled hold=$holdMs"
+                    val snapshot = "active=$active stop=$stopEnabled a11y=$accessibilityEnabled hold=$holdMs"
                     if (snapshot != lastLoggedState) {
                         lastLoggedState = snapshot
                         XposedBridge.log("[RecordYou] state $snapshot")
                     }
                 }
+                ACTION_CONFIG -> runCatching {
+                    val enabled = intent.getBooleanExtra(EXTRA_QUICK_RECORD, false)
+                    quickHoldMs = intent.getIntExtra(EXTRA_QUICK_HOLD_MS, quickHoldMs)
+                        .coerceIn(MIN_HOLD_MS, MAX_HOLD_MS)
+                    if (enabled != quickRecordEnabled) {
+                        quickRecordEnabled = enabled
+                        XposedBridge.log("[RecordYou] quick record enabled=$enabled")
+                    }
+                }
+                // 熄屏请求：锁屏录音页的倒计时到期，立即关屏
+                ACTION_GO_SLEEP -> runCatching { goToSleep(context) }
                 // 探活应答：只证明模块注入成功，不改变任何录制状态
                 ACTION_PING -> runCatching {
                     context?.sendBroadcast(
@@ -150,59 +223,156 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
         // 通话等非普通音频场景不接管
         if (audioManager.mode != AudioManager.MODE_NORMAL) return
 
-        val interactive = isInteractive(context)
-        val sequenceActive = pendingKeyCode != KeyEvent.KEYCODE_UNKNOWN
         val handler = (XposedHelpers.getObjectField(param.thisObject, "mHandler") as? Handler)
             ?: mainHandler
 
         when (event.action) {
-            KeyEvent.ACTION_DOWN -> {
-                if (event.repeatCount > 0) {
-                    if (sequenceActive) param.setResult(0)
-                    return
-                }
-                if (event.repeatCount == 0) {
-                    XposedBridge.log(
-                        "[RecordYou] DOWN key=${event.keyCode} interactive=$interactive " +
-                            "active=${isActiveNow()} a11y=$accessibilityEnabled seq=$sequenceActive"
-                    )
-                }
-                if (sequenceActive) {
-                    param.setResult(0)
-                    return
-                }
-                // 无障碍负责亮屏，模块负责息屏；无障碍不可用时模块两种状态都接管
-                if (!shouldHandle(interactive)) return
-
-                pendingKeyCode = event.keyCode
-                longPressTriggered = false
-                val runnable = Runnable { onHoldTimeout(context, event.keyCode) }
-                pendingRunnable = runnable
-                pendingHandler = handler
-                handler.postDelayed(runnable, holdMs.toLong())
-                // 目标方法在新版本返回 int，必须给 0（吞键），不能给 null
-                param.setResult(0)
-            }
-
-            KeyEvent.ACTION_UP -> {
-                // 没接管过这个序列就放行；接管过则必须吞掉 UP，避免系统补调音量
-                if (!sequenceActive) return
-                param.setResult(0)
-                cancelPending()
-                if (!longPressTriggered) adjustVolume(context, pendingKeyCode)
-                pendingKeyCode = KeyEvent.KEYCODE_UNKNOWN
-                longPressTriggered = false
-            }
+            KeyEvent.ACTION_DOWN -> handleDown(param, context, handler, event)
+            KeyEvent.ACTION_UP -> handleUp(param, event)
         }
+    }
+
+    private fun handleDown(
+        param: MethodHookParam,
+        context: Context,
+        handler: Handler,
+        event: KeyEvent
+    ) {
+        val interactive = isInteractive(context)
+        val sequenceActive = pendingKeyCode != KeyEvent.KEYCODE_UNKNOWN
+
+        if (event.repeatCount > 0) {
+            if (!sequenceActive) return
+            // 快捷录音序列在双键窗口关闭后放行长按重复事件，
+            // 保持「按住音量键连续调节」的系统手感
+            if (quickSeq && !seqStopArmed && !dualWindowOpen && !dualActive) {
+                repeatForwarded = true
+                return
+            }
+            param.setResult(0)
+            return
+        }
+
+        if (sequenceActive) {
+            // 观察窗内按下另一个音量键：升级为双键组合，开始双键长按计时
+            if (quickSeq && dualWindowOpen && !dualActive &&
+                event.keyCode != pendingKeyCode
+            ) {
+                dualActive = true
+                dualAttempted = true
+                secondKeyCode = event.keyCode
+                cancelDualWindow()
+                // 双键接管后取消单键长按停止，双键的结果由 App 侧决定
+                cancelPending()
+                val runnable = Runnable { onDualHoldTimeout(context) }
+                dualHoldRunnable = runnable
+                pendingHandler = handler
+                handler.postDelayed(runnable, quickHoldMs.toLong())
+                XposedBridge.log("[RecordYou] dual volume keys detected")
+            }
+            param.setResult(0)
+            return
+        }
+
+        // 序列起点：决定本次要不要接管
+        val stopArmed = isActiveNow() && stopEnabled && (!interactive || !accessibilityEnabled)
+        val quickArmed = quickRecordEnabled && !interactive
+        if (!stopArmed && !quickArmed) return
+
+        XposedBridge.log(
+            "[RecordYou] DOWN key=${event.keyCode} interactive=$interactive " +
+                "active=${isActiveNow()} stop=$stopArmed quick=$quickArmed a11y=$accessibilityEnabled"
+        )
+
+        pendingKeyCode = event.keyCode
+        secondKeyCode = KeyEvent.KEYCODE_UNKNOWN
+        longPressTriggered = false
+        seqStopArmed = stopArmed
+        quickSeq = quickArmed
+        dualWindowOpen = false
+        dualActive = false
+        dualTriggered = false
+        dualAttempted = false
+        repeatForwarded = false
+        pendingHandler = handler
+
+        if (stopArmed) {
+            val runnable = Runnable { onHoldTimeout(context, event.keyCode) }
+            pendingRunnable = runnable
+            handler.postDelayed(runnable, holdMs.toLong())
+        }
+        if (quickArmed) {
+            dualWindowOpen = true
+            val runnable = Runnable { dualWindowOpen = false }
+            dualWindowRunnable = runnable
+            handler.postDelayed(runnable, DUAL_WINDOW_MS)
+        }
+        // 目标方法在新版本返回 int，必须给 0（吞键），不能给 null
+        param.setResult(0)
+    }
+
+    private fun handleUp(param: MethodHookParam, event: KeyEvent) {
+        val sequenceActive = pendingKeyCode != KeyEvent.KEYCODE_UNKNOWN
+        // 没接管过这个序列就放行；接管过则必须吞掉 UP，避免系统补调音量
+        if (!sequenceActive) return
+
+        // 先松开的是第二个键：结束双键判定，主键序列继续
+        if (event.keyCode == secondKeyCode) {
+            param.setResult(0)
+            secondKeyCode = KeyEvent.KEYCODE_UNKNOWN
+            dualActive = false
+            cancelDualHold()
+            return
+        }
+
+        // 序列外的其它键（理论上不会出现），吞掉保持序列一致
+        if (event.keyCode != pendingKeyCode) {
+            param.setResult(0)
+            return
+        }
+
+        param.setResult(0)
+        cancelPending()
+        cancelDualWindow()
+        cancelDualHold()
+        // 单键短按（未触发任何长按、未放行过重复事件、未组合过双键）：
+        // 补一次音量调节，短按体验和平时完全一致
+        if (!longPressTriggered && !dualAttempted && !repeatForwarded) {
+            adjustVolume(param, pendingKeyCode)
+        }
+        resetSequence()
+    }
+
+    private fun resetSequence() {
+        pendingKeyCode = KeyEvent.KEYCODE_UNKNOWN
+        secondKeyCode = KeyEvent.KEYCODE_UNKNOWN
+        longPressTriggered = false
+        quickSeq = false
+        seqStopArmed = false
+        dualWindowOpen = false
+        dualActive = false
+        dualTriggered = false
+        dualAttempted = false
+        repeatForwarded = false
     }
 
     private fun onHoldTimeout(context: Context, keyCode: Int) {
         if (pendingKeyCode != keyCode) return
         pendingRunnable = null
-        if (!isActiveNow()) return
+        if (!isActiveNow() || !stopEnabled) return
         longPressTriggered = true
         sendStop(context)
         XposedBridge.log("[RecordYou] volume long press -> stop recording")
+    }
+
+    private fun onDualHoldTimeout(context: Context) {
+        dualHoldRunnable = null
+        if (!dualActive || pendingKeyCode == KeyEvent.KEYCODE_UNKNOWN) return
+        if (!quickRecordEnabled) return
+        dualTriggered = true
+        wakeUp(context)
+        sendQuickStart(context)
+        XposedBridge.log("[RecordYou] dual volume long press -> quick record")
     }
 
     private fun sendStop(context: Context) {
@@ -216,7 +386,60 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
         }
     }
 
-    private fun adjustVolume(context: Context, keyCode: Int) {
+    private fun sendQuickStart(context: Context) {
+        runCatching {
+            context.sendBroadcast(
+                Intent(ACTION_QUICK_START).setClassName(
+                    BuildConfig.APPLICATION_ID,
+                    "com.bnyro.recorder.receivers.XposedQuickRecordReceiver"
+                )
+            )
+        }
+    }
+
+    /** system_server 持有 DEVICE_POWER，wakeUp 不受限制；SDK 里该方法是隐藏的，用反射调 */
+    private fun wakeUp(context: Context) {
+        runCatching {
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                ?: return@runCatching
+            powerManager.javaClass
+                .getMethod("wakeUp", Long::class.javaPrimitiveType)
+                .invoke(powerManager, SystemClock.uptimeMillis())
+        }.onFailure {
+            XposedBridge.log("[RecordYou] wakeUp failed: $it")
+        }
+    }
+
+    /** 同上：goToSleep 也是隐藏方法，Android 13 起废弃单参数版本，做两级回退 */
+    private fun goToSleep(context: Context?) {
+        val ctx = context ?: appContext ?: return
+        runCatching {
+            val powerManager = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                ?: return@runCatching
+            val now = SystemClock.uptimeMillis()
+            runCatching {
+                powerManager.javaClass
+                    .getMethod("goToSleep", Long::class.javaPrimitiveType)
+                    .invoke(powerManager, now)
+            }.onFailure {
+                powerManager.javaClass
+                    .getMethod(
+                        "goToSleep",
+                        Long::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType
+                    )
+                    .invoke(powerManager, now, 0, 0)
+            }
+            XposedBridge.log("[RecordYou] goToSleep by quick record countdown")
+        }.onFailure {
+            XposedBridge.log("[RecordYou] goToSleep failed: $it")
+        }
+    }
+
+    private fun adjustVolume(param: MethodHookParam, keyCode: Int) {
+        val context = (XposedHelpers.getObjectField(param.thisObject, "mContext") as? Context)
+            ?: appContext ?: return
         val direction = if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
             AudioManager.ADJUST_RAISE
         } else {
@@ -235,22 +458,26 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
     private fun isActiveNow(): Boolean =
         active && SystemClock.elapsedRealtime() < expireAt
 
-    /**
-     * 有录制状态，且满足下列任一条件才接管：
-     * - 息屏：无障碍收不到按键，必须由模块处理；
-     * - 无障碍不可用：亮屏也由模块兜底。
-     */
-    private fun shouldHandle(interactive: Boolean): Boolean {
-        if (!isActiveNow()) return false
-        return !interactive || !accessibilityEnabled
-    }
-
     private fun cancelPending() {
         pendingRunnable?.let { runnable ->
             (pendingHandler ?: mainHandler).removeCallbacks(runnable)
         }
         pendingRunnable = null
-        pendingHandler = null
+    }
+
+    private fun cancelDualWindow() {
+        dualWindowRunnable?.let { runnable ->
+            (pendingHandler ?: mainHandler).removeCallbacks(runnable)
+        }
+        dualWindowRunnable = null
+        dualWindowOpen = false
+    }
+
+    private fun cancelDualHold() {
+        dualHoldRunnable?.let { runnable ->
+            (pendingHandler ?: mainHandler).removeCallbacks(runnable)
+        }
+        dualHoldRunnable = null
     }
 
     private fun isInteractive(context: Context): Boolean {
@@ -271,9 +498,11 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
         synchronized(this) {
             if (receiverRegistered) return
             runCatching {
-                // 同一个接收器同时处理录制状态同步与探活 ping
+                // 同一个接收器同时处理录制状态同步、功能配置与探活 ping
                 val filter = IntentFilter().apply {
                     addAction(ACTION_STATE)
+                    addAction(ACTION_CONFIG)
+                    addAction(ACTION_GO_SLEEP)
                     addAction(ACTION_PING)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

@@ -6,17 +6,26 @@ import android.os.Handler
 import android.os.Looper
 
 /**
- * 把「正在录制 + 音量键长按时长」同步给 system_server 里的 LSPosed 模块。
+ * 把「正在录制 + 音量键长按时长 + 功能开关」同步给 system_server 里的 LSPosed 模块。
  *
  * 模块没有可靠办法判断 App 进程是否还活着，所以这里用「立即发一次 + 每 5 秒
  * 心跳」的方式，模块侧 20 秒收不到就自动失效。这样即使 App 被杀或崩溃，
  * 息屏音量键最多被占用几十秒，不会永久吞键。
+ *
+ * active 上报的是真实录制状态（不论长按停止开关是否开启），模块据此做
+ * 「录制中 / 空闲」分流：单键长按停止是否武装由 stopEnabled 决定，
+ * 双键长按快捷录音是否武装由配置广播里的 quickRecord 决定。
  */
 object XposedVolumeKeyState {
     private const val ACTION = "com.bnyro.recorder.action.XPOSED_VOLUME_KEY_STATE"
+    private const val ACTION_CONFIG = "com.bnyro.recorder.action.XPOSED_VOLUME_KEY_CONFIG"
     private const val EXTRA_ACTIVE = "active"
     private const val EXTRA_HOLD_MS = "holdMs"
     private const val EXTRA_ACCESSIBILITY = "accessibility"
+    private const val EXTRA_STOP_ENABLED = "stopEnabled"
+    private const val EXTRA_QUICK_RECORD = "quickRecord"
+    private const val EXTRA_QUICK_HOLD_MS = "quickHoldMs"
+    private const val ACTION_GO_SLEEP = "com.bnyro.recorder.action.XPOSED_GO_SLEEP"
     private const val HEARTBEAT_INTERVAL_MS = 5_000L
 
     private val handler = Handler(Looper.getMainLooper())
@@ -51,9 +60,7 @@ object XposedVolumeKeyState {
 
     private fun sendState(context: Context, forceInactive: Boolean = false) {
         runCatching {
-            val active = !forceInactive &&
-                Preferences.prefs.getBoolean(Preferences.volumeKeyStopKey, false) &&
-                RecorderStatusHolder.isRecording
+            val active = !forceInactive && RecorderStatusHolder.isRecording
             val holdMs = Preferences.prefs.getInt(
                 Preferences.volumeKeyStopHoldMsKey,
                 Preferences.volumeKeyStopHoldDefaultMs
@@ -63,8 +70,43 @@ object XposedVolumeKeyState {
                 Intent(ACTION)
                     .putExtra(EXTRA_ACTIVE, active)
                     .putExtra(EXTRA_HOLD_MS, holdMs)
+                    .putExtra(
+                        EXTRA_STOP_ENABLED,
+                        Preferences.prefs.getBoolean(Preferences.volumeKeyStopKey, false)
+                    )
                     .putExtra(EXTRA_ACCESSIBILITY, VolumeKeyStopHelper.isReady(context))
             )
+        }
+    }
+
+    /**
+     * 推送快捷录音总开关给模块。配置不随心跳过期，所以要在开关变化、
+     * 应用启动、开机完成时都补发一次（模块只在 system_server 里存活，
+     * 手机重启后状态丢失，必须由开机广播重新同步）。
+     */
+    fun syncQuickConfig(context: Context) {
+        runCatching {
+            context.applicationContext.sendBroadcast(
+                Intent(ACTION_CONFIG)
+                    .putExtra(
+                        EXTRA_QUICK_RECORD,
+                        Preferences.prefs.getBoolean(Preferences.quickRecordLockscreenKey, false)
+                    )
+                    .putExtra(
+                        EXTRA_QUICK_HOLD_MS,
+                        Preferences.prefs.getInt(
+                            Preferences.quickRecordHoldMsKey,
+                            Preferences.volumeKeyStopHoldDefaultMs
+                        ).coerceIn(300, 3000)
+                    )
+            )
+        }
+    }
+
+    /** 让模块调用 system_server 的 PowerManager.goToSleep() 立即熄屏 */
+    fun requestScreenOff(context: Context) {
+        runCatching {
+            context.applicationContext.sendBroadcast(Intent(ACTION_GO_SLEEP))
         }
     }
 }

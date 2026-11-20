@@ -172,7 +172,11 @@ class RecorderModel : ViewModel() {
     }
 
     @SuppressLint("NewApi")
-    fun startAudioRecorder(context: Context, result: ActivityResult? = null): Boolean {
+    fun startAudioRecorder(
+        context: Context,
+        result: ActivityResult? = null,
+        forceMicrophone: Boolean = false
+    ): Boolean {
         if (!canStart(context)) return false
         activityResult = result
 
@@ -190,9 +194,14 @@ class RecorderModel : ViewModel() {
             return false
         }
 
-        val audioSource = AudioSource.fromInt(
-            Preferences.prefs.getInt(Preferences.audioSourceKey, AudioSource.MICROPHONE.value)
-        )
+        // 锁屏快捷录音强制话筒模式：内录需要 MediaProjection 授权弹窗，锁屏下无法确认
+        val audioSource = if (forceMicrophone) {
+            AudioSource.MICROPHONE
+        } else {
+            AudioSource.fromInt(
+                Preferences.prefs.getInt(Preferences.audioSourceKey, AudioSource.MICROPHONE.value)
+            )
+        }
         // 无损 WAV 仅话筒模式可用
         val lossless = Preferences.prefs.getBoolean(Preferences.losslessRecorderKey, false) &&
             audioSource == AudioSource.MICROPHONE
@@ -201,10 +210,13 @@ class RecorderModel : ViewModel() {
             if (lossless) {
                 Intent(context, LosslessRecorderService::class.java)
             } else {
+                if (forceMicrophone) AudioRecorderService.forceMicRequested = true
                 Intent(context, AudioRecorderService::class.java)
             }
 
-        return startRecorderService(context, serviceIntent)
+        val started = startRecorderService(context, serviceIntent)
+        if (!started) AudioRecorderService.forceMicRequested = false
+        return started
     }
 
     /** 内部/混合音频需要 MediaProjection 授权 */

@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 开机后重新把快捷录音开关同步给 LSPosed 模块 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- 无障碍自愈：只能由 adb 或 root 授予，用于把被系统摘掉的无障碍服务写回 -->
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
@@ -46,7 +48,7 @@
             android:value="true" />
         <meta-data
             android:name="xposeddescription"
-            android:value="录制中息屏长按音量键停止（需要 LSPosed）" />
+            android:value="录制中息屏长按音量键停止；息屏双键长按快捷录音（需要 LSPosed）" />
         <meta-data
             android:name="xposedminversion"
             android:value="82" />
@@ -64,6 +66,16 @@
             android:launchMode="singleTask"
             android:taskAffinity=""
             android:theme="@style/Theme.RecordYou.Transparent" />
+
+        <!-- 锁屏快捷录音页：盖在锁屏之上，由 LSPosed 模块触发拉起。
+             不导出：模块通过广播间接触发，系统 uid 仍可显式启动 -->
+        <activity
+            android:name=".ui.LockscreenRecordActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/Theme.RecordYou" />
 
         <activity
             android:name=".ui.MainActivity"
@@ -127,6 +139,23 @@
             android:enabled="true"
             android:exported="true"
             android:permission="android.permission.STATUS_BAR" />
+
+        <!-- 只接受系统发来的快捷录音指令（双键长按） -->
+        <receiver
+            android:name=".receivers.XposedQuickRecordReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.STATUS_BAR" />
+
+        <!-- 开机后重新同步快捷录音开关给 LSPosed 模块 -->
+        <receiver
+            android:name=".receivers.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

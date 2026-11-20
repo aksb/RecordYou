@@ -30,6 +30,17 @@ class AudioRecorderService : RecorderService() {
     private var systemAudioRecorder: SystemAudioRecorder? = null
     private var isDestroying = false
 
+    /** 锁屏快捷录音强制话筒模式：无视用户设置的音频来源 */
+    private var forceMic = false
+
+    override fun onCreate() {
+        // 前台服务类型在基类 onCreate 里就要用，等不到 onStartCommand 读 extra，
+        // 所以由启动方（RecorderModel）先写到伴生对象，这里接手后立刻清掉
+        forceMic = forceMicRequested
+        forceMicRequested = false
+        super.onCreate()
+    }
+
     override val fgServiceType: Int?
         get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             when (currentAudioSource()) {
@@ -44,9 +55,13 @@ class AudioRecorderService : RecorderService() {
             null
         }
 
-    private fun currentAudioSource() = AudioSource.fromInt(
-        Preferences.prefs.getInt(Preferences.audioSourceKey, AudioSource.MICROPHONE.value)
-    )
+    private fun currentAudioSource() = if (forceMic) {
+        AudioSource.MICROPHONE
+    } else {
+        AudioSource.fromInt(
+            Preferences.prefs.getInt(Preferences.audioSourceKey, AudioSource.MICROPHONE.value)
+        )
+    }
 
     fun prepare(data: ActivityResult) {
         val projectionManager = getSystemService(
@@ -204,5 +219,9 @@ class AudioRecorderService : RecorderService() {
 
     companion object {
         private const val TAG = "AudioRecorderService"
+
+        /** 启动前置 true 则本次录音强制话筒模式，实例创建时消费掉 */
+        @Volatile
+        var forceMicRequested = false
     }
 }
