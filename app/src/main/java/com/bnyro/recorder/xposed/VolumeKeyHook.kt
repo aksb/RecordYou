@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.app.KeyguardManager
 import android.hardware.display.DisplayManager
 import android.media.AudioManager
 import android.os.Build
@@ -61,6 +62,8 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
     private const val EXTRA_STOP_ENABLED = "stopEnabled"
     private const val EXTRA_QUICK_RECORD = "quickRecord"
     private const val EXTRA_QUICK_HOLD_MS = "quickHoldMs"
+    /** 锁屏录音页是否正在显示：页面常亮，isInteractive 此时为 true，需要靠它武装双键手势 */
+    private const val EXTRA_QUICK_PAGE = "quickPage"
 
     /** 心跳间隔 5 秒，20 秒收不到就视为录制结束，避免永久吞掉音量键 */
     private const val STATE_TIMEOUT_MS = 20_000L
@@ -81,6 +84,10 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
 
     @Volatile
     private var quickRecordEnabled = false
+
+    /** 锁屏录音页正在显示：此时屏幕算亮屏，双键手势也要武装（停止/再次开始） */
+    @Volatile
+    private var quickPageShowing = false
 
     @Volatile
     private var accessibilityEnabled = false
@@ -128,6 +135,12 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
     @Volatile
     private var dualTriggered = false
 
+    /** 双键同时按下的起始时刻（elapsedRealtime），供 repeat 兜底判定按住时长 */
+    private var dualHoldStartAt = 0L
+
+    /** 单键序列起点的时刻（elapsedRealtime），供长按停止的 repeat 兜底判定 */
+    private var seqStartAt = 0L
+
     /** 本序列组合过双键（即使未达到长按时长），松手时不补调音量 */
     @Volatile
     private var dualAttempted = false
@@ -140,6 +153,9 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
     private var dualWindowRunnable: Runnable? = null
     private var dualHoldRunnable: Runnable? = null
     private var pendingHandler: Handler? = null
+
+    /** 长按判定期间短暂持有的 CPU 唤醒锁（带超时），防止深度休眠下判定窗口被挂起 */
+    private var sequenceWakeLock: PowerManager.WakeLock? = null
 
     private var lastLoggedState: String? = null
 
@@ -163,6 +179,7 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
                     val enabled = intent.getBooleanExtra(EXTRA_QUICK_RECORD, false)
                     quickHoldMs = intent.getIntExtra(EXTRA_QUICK_HOLD_MS, quickHoldMs)
                         .coerceIn(MIN_HOLD_MS, MAX_HOLD_MS)
+                    quickPageShowing = intent.getBooleanExtra(EXTRA_QUICK_PAGE, false)
                     if (enabled != quickRecordEnabled) {
                         quickRecordEnabled = enabled
                         XposedBridge.log("[RecordYou] quick record enabled=$enabled")
@@ -228,7 +245,7 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
 
         when (event.action) {
             KeyEvent.ACTION_DOWN -> handleDown(param, context, handler, event)
-            KeyEvent.ACTION_UP -> handleUp(param, event)
+            KeyEvent.ACTION_UP -> handleUp(param, context, event)
         }
     }
 
@@ -241,8 +258,34 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
         val interactive = isInteractive(context)
         val sequenceActive = pendingKeyCode != KeyEvent.KEYCODE_UNKNOWN
 
+        // 排查「息屏待机久了双键失效」：只在快捷录音开启时记录按键起点的
+        // 原始屏幕状态。武装判断不成立时原有日志打不出来，这里必须前置，
+        // 否则拿到的是「零日志」无法区分「hook 没进」和「条件不满足」
+        if (event.repeatCount == 0 && quickRecordEnabled) {
+            logInteractivityDiag(context, event.keyCode)
+        }
+
         if (event.repeatCount > 0) {
             if (!sequenceActive) return
+            // 深度休眠（Doze/suspend）下 system_server 主线程的 uptime 停走，
+            // postDelayed 的定时器可能整段跑不完，导致长按判定失效。
+            // 长按 repeat 是硬件输入事件（本身唤醒 CPU），用它兜底判定时长。
+            if (dualActive && !dualTriggered) {
+                if (SystemClock.elapsedRealtime() - dualHoldStartAt >= quickHoldMs) {
+                    triggerQuickRecord(context)
+                }
+                param.setResult(0)
+                return
+            }
+            // 单键「长按停止」同理：录音期间虽有音频 wakelock 兜着，
+            // 但息屏后若 wakelock 被系统放宽仍可能丢失定时器，一并兜底
+            if (seqStopArmed && !longPressTriggered) {
+                if (SystemClock.elapsedRealtime() - seqStartAt >= holdMs) {
+                    triggerSingleStop(context)
+                }
+                param.setResult(0)
+                return
+            }
             // 快捷录音序列在双键窗口关闭后放行长按重复事件，
             // 保持「按住音量键连续调节」的系统手感
             if (quickSeq && !seqStopArmed && !dualWindowOpen && !dualActive) {
@@ -261,6 +304,7 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
                 dualActive = true
                 dualAttempted = true
                 secondKeyCode = event.keyCode
+                dualHoldStartAt = SystemClock.elapsedRealtime()
                 cancelDualWindow()
                 // 双键接管后取消单键长按停止，双键的结果由 App 侧决定
                 cancelPending()
@@ -275,8 +319,14 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
         }
 
         // 序列起点：决定本次要不要接管
+        // 双键武装条件：
+        //  - 息屏：开始/停止都可用（唯一允许「开始录音」的场景）
+        //  - 锁屏录音页显示中（页面常亮）：仅录音进行时武装，用于双键停止；
+        //    空闲的「录制完成」页上不武装——否则快速连续双键会和录音启动的
+        //    异步状态翻转竞争，导致重复启动/无法停止的时序混乱
         val stopArmed = isActiveNow() && stopEnabled && (!interactive || !accessibilityEnabled)
-        val quickArmed = quickRecordEnabled && !interactive
+        val quickArmed = quickRecordEnabled &&
+            (!interactive || (quickPageShowing && isActiveNow()))
         if (!stopArmed && !quickArmed) return
 
         XposedBridge.log(
@@ -295,6 +345,11 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
         dualAttempted = false
         repeatForwarded = false
         pendingHandler = handler
+        seqStartAt = SystemClock.elapsedRealtime()
+        // 深度休眠时 system_server 处理完 DOWN 后会立刻再次挂起，postDelayed
+        // 定时器和按键 repeat 都等不到，长按判定必然失效。序列期间短暂持有
+        // CPU 唤醒锁（自带超时），保证判定窗口内系统不会再次休眠。
+        acquireSequenceWakeLock(context)
 
         if (stopArmed) {
             val runnable = Runnable { onHoldTimeout(context, event.keyCode) }
@@ -311,7 +366,7 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
         param.setResult(0)
     }
 
-    private fun handleUp(param: MethodHookParam, event: KeyEvent) {
+    private fun handleUp(param: MethodHookParam, context: Context, event: KeyEvent) {
         val sequenceActive = pendingKeyCode != KeyEvent.KEYCODE_UNKNOWN
         // 没接管过这个序列就放行；接管过则必须吞掉 UP，避免系统补调音量
         if (!sequenceActive) return
@@ -319,6 +374,13 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
         // 先松开的是第二个键：结束双键判定，主键序列继续
         if (event.keyCode == secondKeyCode) {
             param.setResult(0)
+            // 兜底：计时与 repeat 在深度休眠下都可能失效，松手时补判一次
+            if (dualActive && !dualTriggered &&
+                SystemClock.elapsedRealtime() - dualHoldStartAt >= quickHoldMs
+            ) {
+                XposedBridge.log("[RecordYou] dual hold confirmed on UP (fallback)")
+                triggerQuickRecord(context)
+            }
             secondKeyCode = KeyEvent.KEYCODE_UNKNOWN
             dualActive = false
             cancelDualHold()
@@ -335,12 +397,46 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
         cancelPending()
         cancelDualWindow()
         cancelDualHold()
+        // 兜底：同上。双键优先，且只要组合过双键就不再走单键停止
+        if (dualActive && !dualTriggered) {
+            if (SystemClock.elapsedRealtime() - dualHoldStartAt >= quickHoldMs) {
+                XposedBridge.log("[RecordYou] dual hold confirmed on UP (fallback)")
+                triggerQuickRecord(context)
+            }
+        } else if (seqStopArmed && !longPressTriggered && !dualAttempted) {
+            if (SystemClock.elapsedRealtime() - seqStartAt >= holdMs) {
+                XposedBridge.log("[RecordYou] single hold confirmed on UP (fallback)")
+                triggerSingleStop(context)
+            }
+        }
         // 单键短按（未触发任何长按、未放行过重复事件、未组合过双键）：
         // 补一次音量调节，短按体验和平时完全一致
         if (!longPressTriggered && !dualAttempted && !repeatForwarded) {
             adjustVolume(param, pendingKeyCode)
         }
         resetSequence()
+    }
+
+    /**
+     * 诊断日志：记录双键识别所依赖的原始屏幕状态值。
+     * 用于定位「熄屏待机一段时间后双键失效」——重点看 pmInteractive、
+     * displayState 与 keyguardLocked 三个值在正常/失效两种状态下是否不同。
+     */
+    private fun logInteractivityDiag(context: Context, keyCode: Int) {
+        runCatching {
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+            val display = displayManager?.displays?.firstOrNull()
+            val keyguardManager =
+                context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+            XposedBridge.log(
+                "[RecordYou] DIAG key=$keyCode pmInteractive=${powerManager?.isInteractive}" +
+                    " displayState=${display?.state}" +
+                    " keyguardLocked=${keyguardManager?.isKeyguardLocked}" +
+                    " quick=$quickRecordEnabled stop=$stopEnabled a11y=$accessibilityEnabled" +
+                    " page=$quickPageShowing active=${isActiveNow()}"
+            )
+        }
     }
 
     private fun resetSequence() {
@@ -354,13 +450,51 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
         dualTriggered = false
         dualAttempted = false
         repeatForwarded = false
+        releaseSequenceWakeLock()
+    }
+
+    /**
+     * 序列期间短暂持有 CPU 唤醒锁。深度休眠下 system_server 处理完按键 DOWN
+     * 会马上再次挂起，postDelayed 定时器与按键 repeat 都推进不了，长按判定
+     * 就会失效（表现为连按多次偶尔成功）。带超时兜底，松手时立即释放。
+     */
+    private fun acquireSequenceWakeLock(context: Context) {
+        releaseSequenceWakeLock()
+        runCatching {
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                ?: return@runCatching
+            sequenceWakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "RecordYou:volumeKeyHold"
+            ).apply {
+                setReferenceCounted(false)
+                acquire(maxOf(holdMs, quickHoldMs).toLong() + 3_000L)
+            }
+        }.onFailure {
+            XposedBridge.log("[RecordYou] sequence wake lock failed: $it")
+        }
+    }
+
+    private fun releaseSequenceWakeLock() {
+        runCatching { sequenceWakeLock?.takeIf { it.isHeld }?.release() }
+        sequenceWakeLock = null
     }
 
     private fun onHoldTimeout(context: Context, keyCode: Int) {
         if (pendingKeyCode != keyCode) return
         pendingRunnable = null
+        triggerSingleStop(context)
+    }
+
+    /**
+     * 单键长按到时的统一触发入口。定时器路径与 repeat 兜底路径都走这里，
+     * 用 longPressTriggered 保证只发一次停止。
+     */
+    private fun triggerSingleStop(context: Context) {
+        if (longPressTriggered) return
         if (!isActiveNow() || !stopEnabled) return
         longPressTriggered = true
+        cancelPending()
         sendStop(context)
         XposedBridge.log("[RecordYou] volume long press -> stop recording")
     }
@@ -368,8 +502,19 @@ object VolumeKeyHook : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
     private fun onDualHoldTimeout(context: Context) {
         dualHoldRunnable = null
         if (!dualActive || pendingKeyCode == KeyEvent.KEYCODE_UNKNOWN) return
+        triggerQuickRecord(context)
+    }
+
+    /**
+     * 双键长按到时的统一触发入口。定时器路径（亮屏/未休眠时更精确）与
+     * repeat 兜底路径（深度休眠下定时器不推进）都走这里，用 dualTriggered
+     * 保证只触发一次；两条路径都在 system_server 主线程，无竞态。
+     */
+    private fun triggerQuickRecord(context: Context) {
+        if (dualTriggered) return
         if (!quickRecordEnabled) return
         dualTriggered = true
+        cancelDualHold()
         wakeUp(context)
         sendQuickStart(context)
         XposedBridge.log("[RecordYou] dual volume long press -> quick record")

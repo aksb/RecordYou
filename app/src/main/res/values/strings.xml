@@ -156,12 +156,14 @@
     <string name="quick_record_lockscreen_desc">Only works while the screen is off and locked: hold volume up and down together to start microphone recording; repeat the gesture while recording to stop. The screen turns on and shows a recording page above the lock screen. Nothing changes while the screen is on.</string>
     <string name="quick_record_lsposed_missing">The LSPosed module is not active. Enable it for System Framework and reboot, otherwise this gesture does nothing.</string>
     <string name="quick_record_need_overlay">Overlay permission (display over other apps) is required to show the recording page above the lock screen</string>
-    <string name="quick_record_waiting">Waiting to record</string>
     <string name="quick_record_recording">Recording…</string>
     <string name="quick_record_finished">Recording finished</string>
     <string name="quick_record_done">Done</string>
-    <string name="quick_record_start">Start</string>
+    <string name="quick_record_again">Record again</string>
+    <string name="quick_record_screen_off_now">Turn screen off now</string>
     <string name="quick_record_hold">Dual-key hold duration</string>
+    <string name="quick_record_vibrate">Vibrate when recording starts</string>
+    <string name="quick_record_double_tap_screen_off">Double-tap empty area to turn the screen off</string>
     <string name="quick_record_minutes">%1$d min</string>
     <string name="quick_record_screen_off_in">Screen off in %1$s</string>
     <string name="screen_off_templates_title">Screen-off countdown presets (minutes)</string>

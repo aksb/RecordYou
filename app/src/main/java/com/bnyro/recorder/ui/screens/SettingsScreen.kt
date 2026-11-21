@@ -729,6 +729,18 @@ fun SettingsScreen() {
                     titleRes = R.string.quick_record_hold
                 )
                 Spacer(modifier = Modifier.height(5.dp))
+                CheckboxPref(
+                    prefKey = Preferences.quickRecordVibrateKey,
+                    title = stringResource(R.string.quick_record_vibrate),
+                    defaultValue = true
+                )
+                Spacer(modifier = Modifier.height(5.dp))
+                CheckboxPref(
+                    prefKey = Preferences.doubleTapScreenOffKey,
+                    title = stringResource(R.string.quick_record_double_tap_screen_off),
+                    defaultValue = true
+                )
+                Spacer(modifier = Modifier.height(5.dp))
                 ScreenOffTemplatesPref()
             }
             Spacer(modifier = Modifier.height(10.dp))

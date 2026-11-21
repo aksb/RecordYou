@@ -148,12 +148,14 @@
     <string name="quick_record_lockscreen_desc">仅息屏锁屏时生效：同时长按音量「+」和「-」开始话筒录音，录音中重复该手势则停止。触发后亮屏，显示盖在锁屏上的录音页。亮屏时不受影响，可正常使用图标、磁贴或悬浮球。</string>
     <string name="quick_record_lsposed_missing">未检测到 LSPosed 模块生效。请在 LSPosed 中启用本模块（勾选系统框架）并重启手机，否则该手势不会触发。</string>
     <string name="quick_record_need_overlay">需要「显示在其他应用上层」权限才能在锁屏上弹出录音页</string>
-    <string name="quick_record_waiting">等待录音</string>
     <string name="quick_record_recording">录音中…</string>
     <string name="quick_record_finished">录制完成</string>
     <string name="quick_record_done">完成</string>
-    <string name="quick_record_start">开始</string>
+    <string name="quick_record_again">再录一次</string>
+    <string name="quick_record_screen_off_now">立即熄屏</string>
     <string name="quick_record_hold">双键长按时长</string>
+    <string name="quick_record_vibrate">录音开始时震动提示</string>
+    <string name="quick_record_double_tap_screen_off">双击空白处熄屏</string>
     <string name="quick_record_minutes">%1$d 分钟</string>
     <string name="quick_record_screen_off_in">剩余 %1$s 后熄屏</string>
     <string name="screen_off_templates_title">熄屏倒计时模板（分钟）</string>

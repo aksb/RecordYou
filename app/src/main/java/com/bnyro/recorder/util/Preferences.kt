@@ -65,6 +65,10 @@ object Preferences {
     const val quickRecordLockscreenKey = "quickRecordLockscreen"
     // 双键长按时长，与单键长按停止分开设置
     const val quickRecordHoldMsKey = "quickRecordHoldMs"
+    // 双键触发、录音开始时震动提示
+    const val quickRecordVibrateKey = "quickRecordVibrate"
+    // 锁屏录音页双击空白处熄屏（对应系统锁屏的双击熄屏）
+    const val doubleTapScreenOffKey = "doubleTapScreenOff"
     // 锁屏录音页的三个熄屏倒计时模板（分钟）
     const val screenOffTemplate1Key = "screenOffTemplate1"
     const val screenOffTemplate2Key = "screenOffTemplate2"

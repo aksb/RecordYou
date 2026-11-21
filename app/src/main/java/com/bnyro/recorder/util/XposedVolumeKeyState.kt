@@ -25,8 +25,13 @@ object XposedVolumeKeyState {
     private const val EXTRA_STOP_ENABLED = "stopEnabled"
     private const val EXTRA_QUICK_RECORD = "quickRecord"
     private const val EXTRA_QUICK_HOLD_MS = "quickHoldMs"
+    /** 锁屏录音页是否正在显示：页面常亮时屏幕算「亮屏」，模块需要靠它武装双键手势 */
+    private const val EXTRA_QUICK_PAGE = "quickPage"
     private const val ACTION_GO_SLEEP = "com.bnyro.recorder.action.XPOSED_GO_SLEEP"
     private const val HEARTBEAT_INTERVAL_MS = 5_000L
+
+    @Volatile
+    private var quickPageShowing = false
 
     private val handler = Handler(Looper.getMainLooper())
     private var appContext: Context? = null
@@ -99,8 +104,19 @@ object XposedVolumeKeyState {
                             Preferences.volumeKeyStopHoldDefaultMs
                         ).coerceIn(300, 3000)
                     )
+                    .putExtra(EXTRA_QUICK_PAGE, quickPageShowing)
             )
         }
+    }
+
+    /**
+     * 锁屏录音页前后台同步：页面持 KEEP_SCREEN_ON，系统「亮屏」期间模块的
+     * 息屏判断不成立，必须额外告诉模块「页面在显示」来武装双键手势。
+     */
+    fun setQuickPageShowing(context: Context, showing: Boolean) {
+        if (quickPageShowing == showing) return
+        quickPageShowing = showing
+        syncQuickConfig(context)
     }
 
     /** 让模块调用 system_server 的 PowerManager.goToSleep() 立即熄屏 */
